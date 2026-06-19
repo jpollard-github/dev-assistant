@@ -1,0 +1,467 @@
+# Multi-Agent Development Assistant TODO
+
+## Product Thesis
+
+Build a local-first development assistant that coordinates specialized agents for coding, review, testing, architecture feedback, and technical debt tracking. The system should feel like a senior engineering team embedded in VS Code, with clear handoffs, auditable decisions, and strong guardrails around file edits and tool execution.
+
+## Guiding Principles
+
+- Keep the first version local, inspectable, and boring where possible.
+- Treat agents as role-specific workers with explicit inputs, outputs, permissions, and evaluation criteria.
+- Prefer small, reviewable patches over large autonomous rewrites.
+- Make every agent action traceable: prompt, context, tools used, files changed, tests run, and final rationale.
+- Use MCP servers as capability boundaries, not as a dumping ground for all logic.
+- Assume local LLMs will be slower and less reliable than hosted frontier models; design around incremental workflows, retries, and human approval.
+- Build a useful single-user tool before designing for teams.
+
+## Recommended Initial Scope
+
+The MVP should support one local repository and one active task at a time.
+
+Agents:
+
+- Coordinator: decomposes tasks, assigns work, manages shared state, and asks the user for approval when needed.
+- Coder: proposes and applies small implementation patches.
+- Reviewer: inspects diffs for bugs, maintainability risks, and missing edge cases.
+- Test Writer: adds or updates focused tests.
+- Test Runner: executes project test commands and summarizes failures.
+- Technical Debt Tracker: records follow-up issues in a local debt log.
+
+Interfaces:
+
+- CLI first for faster iteration.
+- VS Code extension second, once orchestration semantics are stable.
+- MCP servers for filesystem-safe repo access, shell command execution, git inspection, test running, and optional issue tracking.
+
+## Architecture Recommendation
+
+Use a TypeScript monorepo with clear package boundaries:
+
+- `apps/cli`: local command-line interface.
+- `apps/vscode-extension`: VS Code integration.
+- `packages/core`: orchestration engine, task graph, event model, agent contracts.
+- `packages/agents`: role definitions, prompts, tool policies, agent-specific output schemas.
+- `packages/mcp-servers`: local MCP servers for repo, shell, git, tests, and memory.
+- `packages/llm`: local model adapters and optional hosted model adapters.
+- `packages/evals`: benchmark tasks, regression suites, scoring helpers.
+- `packages/shared`: shared schemas, logging utilities, config loading.
+
+Recommended stack:
+
+- TypeScript with strict mode.
+- pnpm workspaces or npm workspaces.
+- Zod for schema validation.
+- SQLite for local durable state.
+- Drizzle or Kysely for database access.
+- Model Context Protocol SDK for MCP servers.
+- VS Code Extension API for editor integration.
+- Vitest for unit tests.
+- Playwright only if the extension or web UI needs end-to-end coverage.
+- Ollama, LM Studio, llama.cpp, or vLLM for local model backends.
+
+## Phase 0: Foundation
+
+- [x] Create the monorepo structure.
+- [x] Add TypeScript, linting, formatting, and test tooling.
+- [x] Define project configuration files:
+  - [x] `package.json`
+  - [x] `pnpm-workspace.yaml` or equivalent workspace config
+  - [x] `tsconfig.base.json`
+  - [x] `.gitignore`
+  - [x] `.env.example`
+- [x] Add a root README explaining the local-first goal and security model.
+- [x] Add a simple CLI entrypoint that can print version and config.
+- [x] Define the first local config format:
+  - [x] repo path
+  - [x] model provider
+  - [x] model name
+  - [x] allowed shell commands
+  - [x] test commands
+  - [x] approval policy
+- [x] Add structured logging from the beginning.
+- [x] Add a local data directory convention, such as `.dev-assistant/`.
+
+## Phase 1: Core Orchestrator
+
+- [ ] Define the task lifecycle:
+  - [ ] created
+  - [ ] planned
+  - [ ] assigned
+  - [ ] patch proposed
+  - [ ] patch applied
+  - [ ] reviewed
+  - [ ] tested
+  - [ ] completed
+  - [ ] blocked
+- [ ] Implement a typed event bus for agent messages and tool results.
+- [ ] Implement a coordinator that can run one task through a deterministic sequence.
+- [ ] Store task events in SQLite.
+- [ ] Add JSON schemas for all agent outputs.
+- [ ] Add retry behavior for invalid agent output.
+- [ ] Add a maximum budget per task:
+  - [ ] max model calls
+  - [ ] max shell commands
+  - [ ] max changed files
+  - [ ] max runtime
+- [ ] Add human approval checkpoints before file edits and non-allowlisted commands.
+
+## Phase 2: Local LLM Adapter
+
+- [ ] Implement a provider interface:
+  - [ ] `generateText`
+  - [ ] `generateStructured`
+  - [ ] optional streaming
+  - [ ] token accounting when available
+- [ ] Add one local backend first, probably Ollama for ease of setup.
+- [ ] Add model capability metadata:
+  - [ ] context window
+  - [ ] tool-use support
+  - [ ] structured-output reliability
+  - [ ] recommended roles
+- [ ] Add timeouts and cancellation.
+- [ ] Add prompt snapshots to task logs.
+- [ ] Add optional hosted fallback support only after local workflows work.
+- [ ] Test with at least two model sizes:
+  - [ ] small fast model for classification and summaries
+  - [ ] stronger code model for implementation and review
+
+## Phase 3: MCP Servers
+
+- [ ] Build a repo MCP server:
+  - [ ] list files
+  - [ ] read files
+  - [ ] search with ripgrep
+  - [ ] inspect file metadata
+- [ ] Build a git MCP server:
+  - [ ] status
+  - [ ] diff
+  - [ ] log
+  - [ ] current branch
+- [ ] Build a shell MCP server:
+  - [ ] allowlisted commands only
+  - [ ] timeout support
+  - [ ] output truncation
+  - [ ] clear escalation flow
+- [ ] Build a test MCP server:
+  - [ ] discover package manager
+  - [ ] run configured test commands
+  - [ ] parse common test output
+- [ ] Build a memory MCP server:
+  - [ ] task history
+  - [ ] repository facts
+  - [ ] debt log
+  - [ ] recurring failure patterns
+- [ ] Add permission profiles for each agent.
+- [ ] Add integration tests for every MCP server.
+
+## Phase 4: Agent Roles
+
+- [ ] Coordinator agent:
+  - [ ] creates a short plan
+  - [ ] chooses which agents are needed
+  - [ ] enforces budgets and approvals
+- [ ] Coder agent:
+  - [ ] reads local context
+  - [ ] proposes a focused change
+  - [ ] explains risk and expected tests
+- [ ] Reviewer agent:
+  - [ ] reviews only the actual diff
+  - [ ] prioritizes correctness and regressions
+  - [ ] emits findings with file and line references
+- [ ] Test Writer agent:
+  - [ ] identifies missing coverage
+  - [ ] adds focused tests
+  - [ ] avoids broad snapshot churn
+- [ ] Architecture Review agent:
+  - [ ] checks boundaries, coupling, dependency direction, and migration risk
+  - [ ] produces recommendations, not automatic rewrites
+- [ ] Technical Debt agent:
+  - [ ] records debt items in `.dev-assistant/debt.md` or SQLite
+  - [ ] links each item to files and task history
+  - [ ] distinguishes must-fix, should-fix, and nice-to-have
+
+## Phase 5: Patch Workflow
+
+- [ ] Represent proposed edits as unified diffs or structured file operations.
+- [ ] Validate patches before applying.
+- [ ] Reject patches that touch files outside the configured repo.
+- [ ] Show a summary before applying changes.
+- [ ] Apply patches through a controlled patch service.
+- [ ] Re-read changed files after patching.
+- [ ] Run formatting when configured.
+- [ ] Run tests after implementation and test edits.
+- [ ] Ask Reviewer to inspect the final diff.
+- [ ] Require the Coordinator to produce a final task report.
+
+## Phase 6: CLI Experience
+
+- [ ] Add `dev-assistant init`.
+- [ ] Add `dev-assistant run "task description"`.
+- [ ] Add `dev-assistant review`.
+- [ ] Add `dev-assistant test`.
+- [ ] Add `dev-assistant debt list`.
+- [ ] Add `dev-assistant debt add`.
+- [ ] Add `dev-assistant history`.
+- [ ] Add `dev-assistant config doctor`.
+- [ ] Support interactive approvals.
+- [ ] Support a dry-run mode.
+- [ ] Support machine-readable JSON output for automation.
+
+## Phase 7: VS Code Extension
+
+- [ ] Create a VS Code extension package.
+- [ ] Add a sidebar for active tasks.
+- [ ] Add commands:
+  - [ ] Start assistant task
+  - [ ] Review current diff
+  - [ ] Generate tests for current file
+  - [ ] Explain technical debt
+  - [ ] Show assistant history
+- [ ] Display agent events as a timeline.
+- [ ] Show proposed patches in VS Code's native diff UI.
+- [ ] Add approval buttons for applying edits and running commands.
+- [ ] Support task cancellation.
+- [ ] Add workspace trust checks.
+- [ ] Avoid collecting source code telemetry by default.
+
+## Phase 8: Evaluation System
+
+- [ ] Create a set of small local benchmark repos or fixtures.
+- [ ] Add task categories:
+  - [ ] bug fix
+  - [ ] feature addition
+  - [ ] refactor
+  - [ ] test generation
+  - [ ] review-only
+  - [ ] architecture critique
+- [ ] Score outcomes:
+  - [ ] builds successfully
+  - [ ] tests pass
+  - [ ] minimal changed files
+  - [ ] reviewer catches seeded bugs
+  - [ ] no forbidden file access
+  - [ ] useful final summary
+- [ ] Run evals against multiple local models.
+- [ ] Track regression results over time.
+- [ ] Add a small golden-output suite for structured responses.
+
+## Phase 9: Security And Safety
+
+- [ ] Default to read-only analysis until the user approves edits.
+- [ ] Sandbox shell execution as much as the host OS allows.
+- [ ] Maintain a command allowlist.
+- [ ] Block network access unless explicitly enabled.
+- [ ] Prevent agents from reading secrets by default.
+- [ ] Redact secrets in logs.
+- [ ] Never send code to hosted models unless the user opts in.
+- [ ] Add clear provenance to all generated code.
+- [ ] Add a panic button to cancel tasks and stop subprocesses.
+- [ ] Document threat models:
+  - [ ] prompt injection in repo files
+  - [ ] malicious package scripts
+  - [ ] secret exfiltration
+  - [ ] accidental destructive edits
+  - [ ] runaway token or compute usage
+
+## Phase 10: Technical Debt Tracking
+
+- [ ] Define a debt item schema:
+  - [ ] title
+  - [ ] severity
+  - [ ] files
+  - [ ] rationale
+  - [ ] recommended fix
+  - [ ] first seen task
+  - [ ] status
+- [ ] Auto-create debt candidates from reviewer and architecture findings.
+- [ ] Require user confirmation before adding noisy debt items.
+- [ ] Add duplicate detection.
+- [ ] Add debt aging and priority sorting.
+- [ ] Add commands to resolve, defer, and export debt.
+- [ ] Optionally sync debt to GitHub Issues later.
+
+## Phase 11: Hosted Model Option
+
+- [ ] Add hosted model providers behind an explicit opt-in.
+- [ ] Add per-provider cost estimation.
+- [ ] Add repository-level privacy settings.
+- [ ] Allow role-specific routing:
+  - [ ] local model for search, summaries, and debt tracking
+  - [ ] stronger hosted model for difficult coding tasks
+  - [ ] local or hosted reviewer depending on privacy needs
+- [ ] Show estimated cost before starting a task.
+- [ ] Log actual token usage when provider APIs return it.
+
+## Phase 12: Packaging And Distribution
+
+- [ ] Package the CLI.
+- [ ] Package the VS Code extension.
+- [ ] Add install docs for local model runtimes.
+- [ ] Add first-run diagnostics.
+- [ ] Add example workflows.
+- [ ] Add upgrade and migration logic for local SQLite state.
+- [ ] Add crash reporting only as opt-in.
+
+## Estimated Build Effort
+
+For a solo experienced TypeScript developer:
+
+- Prototype CLI with one local model and simple agents: 3 to 6 weeks.
+- Useful MVP with patching, tests, review, and local state: 2 to 4 months.
+- Polished VS Code extension and robust MCP servers: 4 to 8 months.
+- Production-grade reliability, evals, security hardening, docs, and packaging: 9 to 18 months.
+
+For a small team of 2 to 4 engineers:
+
+- Prototype: 2 to 4 weeks.
+- Useful MVP: 6 to 10 weeks.
+- Strong beta: 4 to 6 months.
+- Mature product: 6 to 12 months.
+
+The hardest parts will not be writing the agents. The hard parts will be reliability, context selection, permissioning, patch quality, local model latency, and making failures understandable.
+
+## Estimated Build Cost
+
+Assuming US-based contract or opportunity-cost rates:
+
+- Solo prototype: $15,000 to $60,000.
+- Solo MVP: $60,000 to $180,000.
+- Small-team beta: $200,000 to $600,000.
+- Mature product: $600,000 to $1,500,000+.
+
+Lower-cost self-build assumptions:
+
+- If this is a learning project and you value your own time separately, cash cost can stay under $1,000 to $5,000 for the first few months.
+- Main cash expenses would be hardware upgrades, occasional hosted model usage, test devices, and marketplace or signing fees.
+
+## Estimated Maintenance Cost
+
+Monthly maintenance after MVP:
+
+- Solo personal project: $100 to $1,000 per month in cash costs, plus 10 to 30 hours of upkeep.
+- Serious open-source project: $1,000 to $5,000 per month, plus 0.25 to 1 full-time engineer.
+- Commercial product: $10,000 to $75,000+ per month depending on support, hosted services, security review, CI usage, and release cadence.
+
+Maintenance work will include:
+
+- Updating model adapters.
+- Updating MCP SDK usage.
+- Tracking VS Code API changes.
+- Fixing prompt regressions.
+- Improving evals.
+- Hardening sandboxing.
+- Supporting new package managers and test frameworks.
+- Handling bug reports from different operating systems and repo layouts.
+
+## Estimated Usage Cost
+
+Local-only usage:
+
+- Model API cost: $0.
+- Electricity: usually $2 to $30 per month for casual use, more for heavy GPU use.
+- Hardware: $0 if you already have a capable machine; $1,500 to $4,000+ for a strong local development machine; $3,000 to $8,000+ for a serious local GPU workstation.
+- Latency cost: local models may be slower, especially for multi-agent workflows.
+
+Hosted or hybrid usage:
+
+- Light personal use: $5 to $50 per month.
+- Heavy personal use: $50 to $300 per month.
+- Small team: $300 to $3,000 per month.
+- Larger team or CI-integrated agent workflows: $3,000 to $25,000+ per month.
+
+Cost drivers:
+
+- Number of agent turns per task.
+- Context size.
+- Whether every role uses a strong model.
+- Test and build frequency.
+- Whether code is sent to hosted providers.
+- Number of repositories and users.
+
+## Recommended Cost Controls
+
+- [ ] Use cheaper local models for planning, summarization, and debt tracking.
+- [ ] Use stronger models only for coding and review.
+- [ ] Cache repository summaries.
+- [ ] Limit context to files proven relevant by search.
+- [ ] Cap model calls per task.
+- [ ] Cap patch size.
+- [ ] Run narrow tests before full suites.
+- [ ] Estimate cost before hosted calls.
+- [ ] Store per-task cost and runtime metrics.
+- [ ] Add a "local-only" mode that hard-blocks hosted providers.
+
+## Major Risks
+
+- Local models may produce plausible but incorrect code.
+- Multi-agent loops can amplify mistakes if agents trust each other too much.
+- Prompt injection from repository content can manipulate tool use.
+- Shell command execution can be dangerous without strict policies.
+- VS Code UX can become noisy if every agent emits too much detail.
+- Technical debt tracking can become a junk drawer unless deduplicated and prioritized.
+- Architecture review can sound impressive while being too generic.
+- Maintaining compatibility across many repo types can become a large support burden.
+
+## Risk Mitigations
+
+- [ ] Keep humans in the loop for edits and risky commands.
+- [ ] Make reviewer agents adversarial and diff-focused.
+- [ ] Use structured outputs and validate them.
+- [ ] Keep task scope small.
+- [ ] Build evals early.
+- [ ] Keep logs inspectable.
+- [ ] Prefer deterministic orchestration over open-ended agent chats.
+- [ ] Add permissions per agent.
+- [ ] Separate recommendations from automatic actions.
+- [ ] Measure usefulness, not just model fluency.
+
+## Suggested First Milestone
+
+Build this first:
+
+- [ ] CLI command: `dev-assistant run "fix this bug"`
+- [ ] One Coordinator agent.
+- [ ] One Coder agent.
+- [ ] One Reviewer agent.
+- [ ] Repo search and file read tools.
+- [ ] Git diff inspection.
+- [ ] Patch proposal.
+- [ ] Human approval before patch apply.
+- [ ] Configured test command.
+- [ ] Final summary with changed files, test results, and reviewer findings.
+
+Do not build the VS Code extension until this workflow feels useful from the CLI.
+
+## Suggested Second Milestone
+
+Add:
+
+- [ ] Test Writer agent.
+- [ ] Technical Debt agent.
+- [ ] SQLite event history.
+- [ ] Debt log.
+- [ ] Evaluation fixtures.
+- [ ] Role-specific local model routing.
+
+## Suggested Third Milestone
+
+Add:
+
+- [ ] VS Code sidebar.
+- [ ] Native diff approval.
+- [ ] Task timeline.
+- [ ] Workspace trust integration.
+- [ ] Better cancellation and command controls.
+
+## Definition Of Done For MVP
+
+- [ ] Can run against at least three real TypeScript repositories.
+- [ ] Can complete small bug-fix tasks with human approval.
+- [ ] Produces review findings that are sometimes genuinely useful.
+- [ ] Can add or update tests for simple changes.
+- [ ] Runs configured tests and summarizes failures accurately.
+- [ ] Tracks technical debt without excessive noise.
+- [ ] Keeps all source local unless hosted mode is explicitly enabled.
+- [ ] Has clear logs for every agent decision and tool call.
+- [ ] Has basic evals that catch regressions.
+- [ ] Has documentation good enough for another developer to install and try it.

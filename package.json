@@ -1,0 +1,28 @@
+{
+  "name": "dev-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first multi-agent development assistant.",
+  "type": "module",
+  "packageManager": "pnpm@10.12.4",
+  "scripts": {
+    "build": "corepack pnpm -r build",
+    "check": "corepack pnpm -r check",
+    "dev": "node apps/cli/dist/index.js",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "test": "corepack pnpm -r test",
+    "typecheck": "tsc -b"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.29.0",
+    "@types/node": "^24.0.3",
+    "eslint": "^9.29.0",
+    "prettier": "^3.5.3",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.34.1",
+    "vitest": "^3.2.4"
+  }
+}

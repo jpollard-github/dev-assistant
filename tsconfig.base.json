@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "allowSyntheticDefaultImports": true,
+    "declaration": true,
+    "declarationMap": true,
+    "esModuleInterop": true,
+    "exactOptionalPropertyTypes": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "baseUrl": ".",
+    "paths": {
+      "@dev-assistant/shared": ["packages/shared/src/index.ts"],
+      "@dev-assistant/core": ["packages/core/src/index.ts"],
+      "@dev-assistant/agents": ["packages/agents/src/index.ts"],
+      "@dev-assistant/mcp-servers": ["packages/mcp-servers/src/index.ts"],
+      "@dev-assistant/llm": ["packages/llm/src/index.ts"],
+      "@dev-assistant/evals": ["packages/evals/src/index.ts"]
+    },
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2023",
+    "verbatimModuleSyntax": true
+  }
+}
