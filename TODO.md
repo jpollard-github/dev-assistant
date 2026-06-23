@@ -83,27 +83,34 @@ Recommended stack:
 
 ## Phase 1: Core Orchestrator
 
-- [ ] Define the task lifecycle:
-  - [ ] created
-  - [ ] planned
-  - [ ] assigned
-  - [ ] patch proposed
-  - [ ] patch applied
-  - [ ] reviewed
-  - [ ] tested
-  - [ ] completed
-  - [ ] blocked
-- [ ] Implement a typed event bus for agent messages and tool results.
-- [ ] Implement a coordinator that can run one task through a deterministic sequence.
-- [ ] Store task events in SQLite.
-- [ ] Add JSON schemas for all agent outputs.
-- [ ] Add retry behavior for invalid agent output.
-- [ ] Add a maximum budget per task:
-  - [ ] max model calls
-  - [ ] max shell commands
-  - [ ] max changed files
-  - [ ] max runtime
-- [ ] Add human approval checkpoints before file edits and non-allowlisted commands.
+- [x] Define the task lifecycle:
+  - [x] created
+  - [x] planned
+  - [x] assigned
+  - [x] patch proposed
+  - [x] patch applied
+  - [x] reviewed
+  - [x] tested
+  - [x] completed
+  - [x] blocked
+- [x] Implement a typed event bus for agent messages and tool results.
+- [x] Implement a coordinator that can run one task through a deterministic sequence.
+- [x] Store task events in SQLite.
+- [x] Add JSON schemas for all agent outputs.
+- [x] Add retry behavior for invalid agent output.
+- [x] Add a maximum budget per task:
+  - [x] max model calls
+  - [x] max shell commands
+  - [x] max changed files
+  - [x] max runtime
+- [x] Add human approval checkpoints before file edits and non-allowlisted commands.
+
+## Questions Before Phase 2
+
+- [x] Decide whether task budget defaults should stay in orchestration code or move into the persisted user config schema.
+Decision: Keep them in orchestration code for now, but design the API so Phase 2 or 3 can add optional config overrides later. This keeps defaults stable while product semantics are still moving without blocking future user-configurable budgets.
+- [x] Decide whether the coordinator should keep the current fixed four-role sequence or move to dynamic role selection once real model adapters are added.
+Decision: Keep the fixed four-role sequence through Phase 2, then introduce dynamic role selection only after the model adapter path is stable and there are enough traces to judge what should be optional. This preserves a controlled baseline before adding smarter routing.
 
 ## Phase 2: Local LLM Adapter
 
@@ -120,6 +127,8 @@ Recommended stack:
   - [ ] recommended roles
 - [ ] Add timeouts and cancellation.
 - [ ] Add prompt snapshots to task logs.
+- [ ] Design the provider/orchestration API so task budgets can gain optional config overrides later without moving default limits out of orchestration code yet.
+- [ ] Keep the fixed coordinator -> coder -> reviewer -> test-runner sequence as the baseline flow while integrating real model adapters.
 - [ ] Add optional hosted fallback support only after local workflows work.
 - [ ] Test with at least two model sizes:
   - [ ] small fast model for classification and summaries
@@ -158,7 +167,7 @@ Recommended stack:
 
 - [ ] Coordinator agent:
   - [ ] creates a short plan
-  - [ ] chooses which agents are needed
+  - [ ] keeps the fixed four-role sequence through the initial real-model integration baseline
   - [ ] enforces budgets and approvals
 - [ ] Coder agent:
   - [ ] reads local context
@@ -179,6 +188,10 @@ Recommended stack:
   - [ ] records debt items in `.dev-assistant/debt.md` or SQLite
   - [ ] links each item to files and task history
   - [ ] distinguishes must-fix, should-fix, and nice-to-have
+
+## Post-Phase 4 Follow-Up
+
+- [ ] Introduce dynamic role selection only after the fixed-sequence baseline has enough task traces to justify which roles should become optional.
 
 ## Phase 5: Patch Workflow
 
@@ -203,6 +216,7 @@ Recommended stack:
 - [ ] Add `dev-assistant debt add`.
 - [ ] Add `dev-assistant history`.
 - [ ] Add `dev-assistant config doctor`.
+- [ ] If budget overrides are exposed later, add them as optional advanced config rather than replacing orchestration-owned defaults.
 - [ ] Support interactive approvals.
 - [ ] Support a dry-run mode.
 - [ ] Support machine-readable JSON output for automation.

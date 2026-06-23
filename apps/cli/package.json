@@ -13,6 +13,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@dev-assistant/core": "workspace:*",
     "@dev-assistant/shared": "workspace:*"
   },
   "devDependencies": {

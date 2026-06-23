@@ -4,7 +4,7 @@ Dev Assistant is a local-first multi-agent development assistant. The goal is to
 
 ## Current Status
 
-This repository is in Phase 0: foundation. The first deliverable is a TypeScript monorepo with a CLI, shared config schema, structured logging, and a local data directory convention.
+This repository is in Phase 1: core orchestrator. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, and a minimal CLI `run` command on top of the Phase 0 foundation.
 
 ## Local-First Security Model
 
@@ -14,14 +14,15 @@ This repository is in Phase 0: foundation. The first deliverable is a TypeScript
 - File edits and risky commands should require human approval.
 - Logs are structured so agent actions can be audited.
 - Local state lives in `.dev-assistant/`, which is ignored except for a placeholder file.
+- Phase 1 intentionally uses safe default stubs for patch application and shell execution until later phases wire in real tool services.
 
 ## Workspace Layout
 
 - `apps/cli`: command-line entrypoint.
 - `apps/vscode-extension`: placeholder package for the planned VS Code extension.
 - `packages/shared`: shared schemas, config loading, logging, and data directory helpers.
-- `packages/core`: planned orchestration engine.
-- `packages/agents`: planned role definitions and agent contracts.
+- `packages/core`: task orchestration engine, event bus, budgets, approvals, and SQLite event storage.
+- `packages/agents`: role definitions and structured output schemas for coordinator, coder, reviewer, and test-runner flows.
 - `packages/mcp-servers`: planned MCP capability servers.
 - `packages/llm`: planned local and optional hosted model adapters.
 - `packages/evals`: planned evaluation fixtures and scoring helpers.
@@ -45,7 +46,14 @@ pnpm dev -- version
 Print the resolved config:
 
 ```sh
-pnpm dev -- config
+corepack pnpm dev -- config
+```
+
+Run the Phase 1 orchestration flow:
+
+```sh
+corepack pnpm build
+node apps/cli/dist/index.js run "describe the task"
 ```
 
 ## Configuration
@@ -70,7 +78,13 @@ Create `dev-assistant.config.json` at the repository root when you want to overr
 ## Development
 
 ```sh
-pnpm check
-pnpm typecheck
-pnpm test
+corepack pnpm check
+corepack pnpm typecheck
+corepack pnpm test
+corepack pnpm build
 ```
+
+## Current Caveats
+
+- `dev-assistant run` currently validates orchestration, persistence, and approval flow, but the default patch applier is a no-op and the default shell runner is stubbed.
+- A blocked task is currently reported in the JSON result, but the CLI does not yet turn that into a non-zero process exit code.
