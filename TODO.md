@@ -10,7 +10,7 @@ This file is the planning source of truth for the repository.
 
 ## Current Status
 
-Current phase: Phase 6 complete, with Phase 4 follow-up items still open.
+Current phase: Phase 7 complete, with Phase 4 follow-up items still open.
 
 What is implemented today:
 
@@ -26,11 +26,12 @@ What is implemented today:
 - The Phase 5 path was live-validated locally against a throwaway Git fixture using Ollama and `qwen2.5-coder:7b`.
 - Phase 6 now includes `init`, `review`, `test`, `debt list`, `debt add`, `history`, `config doctor`, interactive approvals, dry-run support, and `--json` machine-readable output.
 - The non-model CLI commands now work without requiring Ollama to be running.
+- Phase 7 now includes a functional VS Code extension package with an activity-bar sidebar, active-task timeline, native diff previews for patch approvals, modal approval controls for edits and shell commands, task cancellation, workspace trust gating, and history/test/debt/review commands surfaced in the editor.
 
 What that means for MVP:
 
-- The project has crossed into an early MVP-capable state for very small, low-risk tasks.
-- The biggest remaining unlocks are better reviewer precision, real test-writing/edit application, and reducing technical-debt noise.
+- The project has crossed into an early MVP-capable state for small, low-risk tasks in both the CLI and VS Code.
+- The biggest remaining unlocks are better reviewer precision, real test-writing/edit application, evaluation coverage, and reducing technical-debt noise.
 
 ## Implemented Decisions
 
@@ -38,7 +39,7 @@ What that means for MVP:
 - Use a CLI-first architecture before building the VS Code extension.
 - Use TypeScript strict mode across all packages.
 - Use `apps/*` and `packages/*` workspace boundaries.
-- Include a placeholder VS Code extension package now, but keep implementation deferred until the CLI orchestration is useful.
+- Use the live VS Code extension as the second interface layer now that the CLI orchestration is useful.
 - Keep the default runtime mode `local-only`.
 - Use Ollama as the default local model provider in examples because it is simple to run locally.
 - Use `qwen2.5-coder:7b` as the example default model name; this is configurable and not a hard requirement.
@@ -300,20 +301,20 @@ This phase replaces the current no-op patch applier with a real, controlled patc
 
 ## Phase 7: VS Code Extension
 
-- [ ] Create a VS Code extension package.
-- [ ] Add a sidebar for active tasks.
-- [ ] Add commands:
-  - [ ] Start assistant task
-  - [ ] Review current diff
-  - [ ] Generate tests for current file
-  - [ ] Explain technical debt
-  - [ ] Show assistant history
-- [ ] Display agent events as a timeline.
-- [ ] Show proposed patches in VS Code's native diff UI.
-- [ ] Add approval buttons for applying edits and running commands.
-- [ ] Support task cancellation.
-- [ ] Add workspace trust checks.
-- [ ] Avoid collecting source code telemetry by default.
+- [x] Create a VS Code extension package.
+- [x] Add a sidebar for active tasks.
+- [x] Add commands:
+  - [x] Start assistant task
+  - [x] Review current diff
+  - [x] Generate tests for current file
+  - [x] Explain technical debt
+  - [x] Show assistant history
+- [x] Display agent events as a timeline.
+- [x] Show proposed patches in VS Code's native diff UI.
+- [x] Add approval buttons for applying edits and running commands.
+- [x] Support task cancellation.
+- [x] Add workspace trust checks.
+- [x] Avoid collecting source code telemetry by default.
 
 ## Phase 8: Evaluation System
 
@@ -475,12 +476,12 @@ Cost drivers:
 - [ ] Use stronger models only for coding and review.
 - [ ] Cache repository summaries.
 - [ ] Limit context to files proven relevant by search.
-- [ ] Cap model calls per task.
-- [ ] Cap patch size.
+- [x] Cap model calls per task.
+- [x] Cap patch size.
 - [ ] Run narrow tests before full suites.
 - [ ] Estimate cost before hosted calls.
 - [ ] Store per-task cost and runtime metrics.
-- [ ] Add a "local-only" mode that hard-blocks hosted providers.
+- [x] Add a "local-only" mode that hard-blocks hosted providers.
 
 ## Major Risks
 
@@ -495,15 +496,15 @@ Cost drivers:
 
 ## Risk Mitigations
 
-- [ ] Keep humans in the loop for edits and risky commands.
+- [x] Keep humans in the loop for edits and risky commands.
 - [ ] Make reviewer agents adversarial and diff-focused.
-- [ ] Use structured outputs and validate them.
+- [x] Use structured outputs and validate them.
 - [ ] Keep task scope small.
 - [ ] Build evals early.
-- [ ] Keep logs inspectable.
-- [ ] Prefer deterministic orchestration over open-ended agent chats.
-- [ ] Add permissions per agent.
-- [ ] Separate recommendations from automatic actions.
+- [x] Keep logs inspectable.
+- [x] Prefer deterministic orchestration over open-ended agent chats.
+- [x] Add permissions per agent.
+- [x] Separate recommendations from automatic actions.
 - [ ] Measure usefulness, not just model fluency.
 
 ## Suggested First Milestone
@@ -538,16 +539,16 @@ Add:
 
 Add:
 
-- [ ] VS Code sidebar.
-- [ ] Native diff approval.
-- [ ] Task timeline.
-- [ ] Workspace trust integration.
-- [ ] Better cancellation and command controls.
+- [x] VS Code sidebar.
+- [x] Native diff approval.
+- [x] Task timeline.
+- [x] Workspace trust integration.
+- [x] Better cancellation and command controls.
 
 ## Definition Of Done For MVP
 
 - [ ] Can run against at least three real TypeScript repositories.
-- [ ] Can complete small bug-fix tasks with human approval.
+- [x] Can complete small bug-fix tasks with human approval.
 - [ ] Produces review findings that are sometimes genuinely useful.
 - [ ] Can add or update tests for simple changes.
 - [x] Runs configured tests and summarizes failures accurately.

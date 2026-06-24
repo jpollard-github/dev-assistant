@@ -118,6 +118,12 @@ export type TaskEvent =
       {
         readonly reason: string;
       }
+    >
+  | BaseTaskEvent<
+      "task.cancelled",
+      {
+        readonly reason: string;
+      }
     >;
 
 export type TaskEventHandler = (event: TaskEvent) => void | Promise<void>;

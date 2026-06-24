@@ -22,6 +22,7 @@ interface EventRow {
 export interface TaskEventStore {
   append(event: TaskEvent): void;
   getTask(taskId: string): TaskRecord | null;
+  listTasks(limit?: number): TaskRecord[];
   listEvents(taskId: string): TaskEvent[];
   close(): void;
 }
@@ -116,6 +117,24 @@ export class SqliteTaskEventStore implements TaskEventStore {
       createdAt: row.created_at,
       updatedAt: row.updated_at
     };
+  }
+
+  public listTasks(limit = 50): TaskRecord[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM tasks ORDER BY updated_at DESC, rowid DESC LIMIT ?"
+      )
+      .all(limit) as unknown as TaskRow[];
+
+    return rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      prompt: row.prompt,
+      status: row.status,
+      budget: JSON.parse(row.budget_json) as TaskBudget,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }));
   }
 
   public listEvents(taskId: string): TaskEvent[] {

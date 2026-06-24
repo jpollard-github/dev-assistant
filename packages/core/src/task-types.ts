@@ -10,6 +10,7 @@ export type TaskStatus =
   | "reviewed"
   | "tested"
   | "completed"
+  | "cancelled"
   | "blocked";
 
 export interface TaskBudget {
@@ -28,6 +29,7 @@ export interface TaskBudgetUsage {
 export interface TaskRequest {
   readonly title?: string;
   readonly prompt: string;
+  readonly signal?: AbortSignal;
   readonly budget?: Partial<TaskBudget>;
   readonly config?: Partial<
     Pick<AssistantConfig, "allowedShellCommands" | "approvalPolicy" | "formatCommands" | "testCommands">
@@ -80,6 +82,9 @@ export interface ApprovalRequest {
   readonly reason: string;
   readonly files?: readonly string[];
   readonly command?: string;
+  readonly summary?: string;
+  readonly diff?: string;
+  readonly operations?: readonly FileOperation[];
 }
 
 export interface ApprovalDecision {

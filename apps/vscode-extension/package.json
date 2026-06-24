@@ -3,12 +3,118 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "activationEvents": [
+    "onView:devAssistant.tasks",
+    "onCommand:devAssistant.startTask",
+    "onCommand:devAssistant.reviewCurrentDiff",
+    "onCommand:devAssistant.generateTestsForCurrentFile",
+    "onCommand:devAssistant.explainTechnicalDebt",
+    "onCommand:devAssistant.showHistory",
+    "onCommand:devAssistant.cancelTask"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "devAssistant",
+          "title": "Dev Assistant",
+          "icon": "resources/activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "devAssistant": [
+        {
+          "id": "devAssistant.tasks",
+          "name": "Active Tasks"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "devAssistant.startTask",
+        "title": "Dev Assistant: Start Assistant Task"
+      },
+      {
+        "command": "devAssistant.reviewCurrentDiff",
+        "title": "Dev Assistant: Review Current Diff"
+      },
+      {
+        "command": "devAssistant.generateTestsForCurrentFile",
+        "title": "Dev Assistant: Generate Tests For Current File"
+      },
+      {
+        "command": "devAssistant.explainTechnicalDebt",
+        "title": "Dev Assistant: Explain Technical Debt"
+      },
+      {
+        "command": "devAssistant.showHistory",
+        "title": "Dev Assistant: Show Assistant History"
+      },
+      {
+        "command": "devAssistant.cancelTask",
+        "title": "Dev Assistant: Cancel Active Task"
+      },
+      {
+        "command": "devAssistant.openPendingDiff",
+        "title": "Dev Assistant: Open Pending Diff"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "devAssistant.startTask",
+          "when": "view == devAssistant.tasks",
+          "group": "navigation"
+        },
+        {
+          "command": "devAssistant.cancelTask",
+          "when": "view == devAssistant.tasks",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "devAssistant.openPendingDiff",
+          "when": "view == devAssistant.tasks",
+          "group": "inline"
+        },
+        {
+          "command": "devAssistant.cancelTask",
+          "when": "view == devAssistant.tasks",
+          "group": "inline"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Dev Assistant",
+      "properties": {
+        "devAssistant.telemetry.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Reserved for future opt-in diagnostics. Source code telemetry stays disabled by default."
+        }
+      }
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
   },
+  "dependencies": {
+    "@dev-assistant/agents": "workspace:*",
+    "@dev-assistant/core": "workspace:*",
+    "@dev-assistant/llm": "workspace:*",
+    "@dev-assistant/mcp-servers": "workspace:*",
+    "@dev-assistant/shared": "workspace:*"
+  },
   "devDependencies": {
+    "@types/node": "^24.0.3",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
   }

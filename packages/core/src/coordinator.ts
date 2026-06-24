@@ -151,7 +151,8 @@ export class TaskCoordinator {
         },
         usage,
         budget,
-        startedAt
+        startedAt,
+        request.signal
       );
       outputs.coordinator = plan;
       currentStatus = await this.transition(
@@ -177,7 +178,8 @@ export class TaskCoordinator {
         },
         usage,
         budget,
-        startedAt
+        startedAt,
+        request.signal
       );
       outputs.coder = proposal;
       currentStatus = await this.transition(
@@ -193,7 +195,10 @@ export class TaskCoordinator {
         const decision = await this.requestApproval(taskId, {
           kind: "file-edit",
           reason: "Patch proposal wants to modify repository files.",
-          files: proposal.files.map((file) => file.path)
+          files: proposal.files.map((file) => file.path),
+          summary: proposal.summary,
+          diff: proposal.diff,
+          operations: proposal.operations
         });
         approvals.push(decision);
 
@@ -243,7 +248,8 @@ export class TaskCoordinator {
         },
         usage,
         budget,
-        startedAt
+        startedAt,
+        request.signal
       );
       outputs.reviewer = review;
       currentStatus = await this.transition(
@@ -298,7 +304,8 @@ export class TaskCoordinator {
           },
           usage,
           budget,
-          startedAt
+          startedAt,
+          request.signal
         );
         outputs["test-runner"] = testReport;
         currentStatus = await this.transition(
@@ -328,7 +335,8 @@ export class TaskCoordinator {
         },
         usage,
         budget,
-        startedAt
+        startedAt,
+        request.signal
       );
       outputs["coordinator-report"] = finalReport;
 
@@ -351,12 +359,21 @@ export class TaskCoordinator {
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      currentStatus = await this.transition(taskId, currentStatus, "blocked", reason);
-      await this.recordEvent({
-        taskId,
-        type: "task.blocked",
-        payload: { reason }
-      });
+      if (error instanceof CancelledTaskError) {
+        currentStatus = await this.transition(taskId, currentStatus, "cancelled", reason);
+        await this.recordEvent({
+          taskId,
+          type: "task.cancelled",
+          payload: { reason }
+        });
+      } else {
+        currentStatus = await this.transition(taskId, currentStatus, "blocked", reason);
+        await this.recordEvent({
+          taskId,
+          type: "task.blocked",
+          payload: { reason }
+        });
+      }
     }
 
     const task = this.store.getTask(taskId);
@@ -377,11 +394,13 @@ export class TaskCoordinator {
     input: Parameters<AgentHandlers[TRole]>[0],
     usage: TaskBudgetUsage,
     budget: TaskBudget,
-    startedAt: number
+    startedAt: number,
+    signal?: AbortSignal
   ): Promise<AgentOutputMap[TRole]> {
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= this.options.maxAgentOutputRetries + 1; attempt += 1) {
+      this.throwIfAborted(signal);
       await this.enforceBudget(
         input.taskId,
         budget,
@@ -402,6 +421,7 @@ export class TaskCoordinator {
         input: AgentInvocationMap[TRole]
       ) => Promise<unknown | AgentExecutionEnvelope> | unknown | AgentExecutionEnvelope;
       const rawResult = await handler(input as AgentInvocationMap[TRole]);
+      this.throwIfAborted(signal);
       const { output: rawOutput, metadata } = this.normalizeAgentResult(rawResult);
 
       await this.recordEvent({
@@ -667,6 +687,12 @@ export class TaskCoordinator {
 
     return true;
   }
+
+  private throwIfAborted(signal: AbortSignal | undefined): void {
+    if (signal?.aborted) {
+      throw new CancelledTaskError("Task cancelled by the user.");
+    }
+  }
 }
 
 export function createDemoAgentHandlers(): AgentHandlers {
@@ -736,3 +762,5 @@ export function createDemoAgentHandlers(): AgentHandlers {
 }
 
 class BlockedTaskError extends Error {}
+
+class CancelledTaskError extends Error {}
