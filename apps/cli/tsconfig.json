@@ -10,6 +10,7 @@
   "references": [
     { "path": "../../packages/core" },
     { "path": "../../packages/llm" },
+    { "path": "../../packages/mcp-servers" },
     { "path": "../../packages/shared" }
   ]
 }

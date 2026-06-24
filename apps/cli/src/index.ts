@@ -8,6 +8,7 @@ import {
   createLocalAgentHandlers,
   createOllamaProvider
 } from "@dev-assistant/llm";
+import { createShellMcpServer, createShellRunnerFromMcpServer } from "@dev-assistant/mcp-servers";
 import {
   ensureDataDir,
   loadAssistantConfig,
@@ -70,12 +71,18 @@ async function runTask(args: string[]): Promise<void> {
   const config = loadAssistantConfig();
   const dataDir = ensureDataDir(config);
   const store = new SqliteTaskEventStore(join(dataDir, "tasks.sqlite"));
+  const repoPath = resolveRepoPath(config);
+  const shellServer = createShellMcpServer({
+    repoPath,
+    allowlist: config.allowedShellCommands
+  });
   const agents = createLocalAgentHandlers({
     provider: resolveModelProvider(config)
   });
   const coordinator = new TaskCoordinator({
     store,
     agents,
+    shellRunner: createShellRunnerFromMcpServer(shellServer),
     approvalDecider: {
       decide(request) {
         if (config.approvalPolicy === "never") {
@@ -125,7 +132,14 @@ async function runTask(args: string[]): Promise<void> {
         task: result.task,
         usage: result.usage,
         approvals: result.approvals,
-        outputRoles: Object.keys(result.outputs)
+        outputRoles: Object.keys(result.outputs),
+        summary: {
+          changedFiles: result.outputs.coder?.files.map((file) => file.path) ?? [],
+          reviewerApproved: result.outputs.reviewer?.approved ?? null,
+          reviewerFindings: result.outputs.reviewer?.findings ?? [],
+          testPassed: result.outputs["test-runner"]?.passed ?? null,
+          testCommandResults: result.outputs["test-runner"]?.commandResults ?? []
+        }
       },
       null,
       2

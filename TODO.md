@@ -10,7 +10,7 @@ This file is the planning source of truth for the repository.
 
 ## Current Status
 
-Current phase: Phase 2 complete, Phase 3 next.
+Current phase: Phase 3 complete, Phase 4 next.
 
 What is implemented today:
 
@@ -19,12 +19,14 @@ What is implemented today:
 - Task lifecycle events, SQLite-backed event history, structured logging, approval checkpoints, agent output schemas, budget enforcement, and prompt snapshots are implemented.
 - Phase 2 now includes a provider interface, an Ollama backend, model capability metadata, optional hosted fallback support, and model-backed role handlers for the fixed four-role baseline.
 - The local model path has been validated in this repo with `qwen2.5:3b` and `qwen2.5-coder:7b`.
-- Patch application is still a no-op and shell command execution is still stubbed, so the assistant is not yet MVP-useful.
+- Phase 3 now includes repo, git, shell, test, and memory capability servers, agent permission profiles, and integration tests for every server.
+- The CLI task flow now uses the real allowlisted shell execution path for configured test commands.
+- Patch application is still a no-op, so the assistant is not yet MVP-useful.
 
 What that means for MVP:
 
 - The project is a strong scaffold, but not yet at the "real bug-fix assistant" stage.
-- The biggest remaining unlocks are real repo/git/shell/test tools and real patch application.
+- The biggest remaining unlocks are real patch application and richer role behavior on top of the new capability servers.
 
 ## Implemented Decisions
 
@@ -43,11 +45,11 @@ What that means for MVP:
 - Run the CLI from built JavaScript for now because the `tsx` development runner opens an IPC pipe that is restricted in this sandboxed environment.
 - Keep task budget defaults in orchestration code for now, but design the API so later phases can add optional config overrides.
 - Keep the fixed coordinator -> coder -> reviewer -> test-runner sequence through the first real-model integration baseline, then revisit dynamic role selection later.
+- Use separate capability-specific local servers for repo, git, shell, test, and memory concerns in the first MCP implementation.
 
 ## Open Questions
 
 - Confirm whether `qwen2.5-coder:7b` should remain the default example model or be replaced with another local model.
-- Confirm whether the first MCP implementation should use separate servers per capability or one development server with separate tools.
 - Decide whether the first real patch-application path should be unified diff based, structured file-operation based, or support both from the start.
 
 ## Product Thesis
@@ -188,32 +190,32 @@ Decision: Keep the fixed four-role sequence through Phase 2, then introduce dyna
 
 This phase replaces the current stubbed shell/test execution path with real tool-backed capability servers.
 
-- [ ] Build a repo MCP server:
-  - [ ] list files
-  - [ ] read files
-  - [ ] search with ripgrep
-  - [ ] inspect file metadata
-- [ ] Build a git MCP server:
-  - [ ] status
-  - [ ] diff
-  - [ ] log
-  - [ ] current branch
-- [ ] Build a shell MCP server:
-  - [ ] allowlisted commands only
-  - [ ] timeout support
-  - [ ] output truncation
-  - [ ] clear escalation flow
-- [ ] Build a test MCP server:
-  - [ ] discover package manager
-  - [ ] run configured test commands
-  - [ ] parse common test output
-- [ ] Build a memory MCP server:
-  - [ ] task history
-  - [ ] repository facts
-  - [ ] debt log
-  - [ ] recurring failure patterns
-- [ ] Add permission profiles for each agent.
-- [ ] Add integration tests for every MCP server.
+- [x] Build a repo MCP server:
+  - [x] list files
+  - [x] read files
+  - [x] search with ripgrep
+  - [x] inspect file metadata
+- [x] Build a git MCP server:
+  - [x] status
+  - [x] diff
+  - [x] log
+  - [x] current branch
+- [x] Build a shell MCP server:
+  - [x] allowlisted commands only
+  - [x] timeout support
+  - [x] output truncation
+  - [x] clear escalation flow
+- [x] Build a test MCP server:
+  - [x] discover package manager
+  - [x] run configured test commands
+  - [x] parse common test output
+- [x] Build a memory MCP server:
+  - [x] task history
+  - [x] repository facts
+  - [x] debt log
+  - [x] recurring failure patterns
+- [x] Add permission profiles for each agent.
+- [x] Add integration tests for every MCP server.
 
 ## Phase 4: Agent Roles
 
@@ -487,16 +489,16 @@ Cost drivers:
 
 Build this first:
 
-- [ ] CLI command: `dev-assistant run "fix this bug"`
-- [ ] One Coordinator agent.
-- [ ] One Coder agent.
-- [ ] One Reviewer agent.
-- [ ] Repo search and file read tools.
-- [ ] Git diff inspection.
-- [ ] Patch proposal.
-- [ ] Human approval before patch apply.
-- [ ] Configured test command.
-- [ ] Final summary with changed files, test results, and reviewer findings.
+- [x] CLI command: `dev-assistant run "fix this bug"`
+- [x] One Coordinator agent.
+- [x] One Coder agent.
+- [x] One Reviewer agent.
+- [x] Repo search and file read tools.
+- [x] Git diff inspection.
+- [x] Patch proposal.
+- [x] Human approval before patch apply.
+- [x] Configured test command.
+- [x] Final summary with changed files, test results, and reviewer findings.
 
 Do not build the VS Code extension until this workflow feels useful from the CLI.
 
@@ -506,7 +508,7 @@ Add:
 
 - [ ] Test Writer agent.
 - [ ] Technical Debt agent.
-- [ ] SQLite event history.
+- [x] SQLite event history.
 - [ ] Debt log.
 - [ ] Evaluation fixtures.
 - [ ] Role-specific local model routing.
@@ -527,9 +529,9 @@ Add:
 - [ ] Can complete small bug-fix tasks with human approval.
 - [ ] Produces review findings that are sometimes genuinely useful.
 - [ ] Can add or update tests for simple changes.
-- [ ] Runs configured tests and summarizes failures accurately.
+- [x] Runs configured tests and summarizes failures accurately.
 - [ ] Tracks technical debt without excessive noise.
-- [ ] Keeps all source local unless hosted mode is explicitly enabled.
-- [ ] Has clear logs for every agent decision and tool call.
+- [x] Keeps all source local unless hosted mode is explicitly enabled.
+- [x] Has clear logs for every agent decision and tool call.
 - [ ] Has basic evals that catch regressions.
 - [ ] Has documentation good enough for another developer to install and try it.

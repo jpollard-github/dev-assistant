@@ -4,8 +4,12 @@
     "provider": "ollama",
     "name": "qwen2.5-coder:7b"
   },
-  "allowedShellCommands": [],
-  "testCommands": [],
+  "allowedShellCommands": [
+    "corepack pnpm test"
+  ],
+  "testCommands": [
+    "corepack pnpm test"
+  ],
   "approvalPolicy": "never",
   "dataDir": ".dev-assistant",
   "mode": "local-only"
