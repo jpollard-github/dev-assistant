@@ -12,6 +12,7 @@ import {
   coordinatorOutputSchema,
   coordinatorReportOutputSchema,
   coderOutputSchema,
+  isAssistantControlPath,
   reviewerOutputSchema,
   testWriterOutputSchema,
   architectureReviewOutputSchema,
@@ -545,7 +546,27 @@ export function createAdvisoryAgentToolkit(
   return {
     async testWriter(input) {
       const provider = providerForRole("test-writer");
-      const searchHits = await repoServer.search("test");
+      const [searchHits, sourceFileSnippets] = await Promise.all([
+        repoServer.search("test"),
+        Promise.all(
+          input.proposal.files.slice(0, 4).map(async (file) => ({
+            path: file.path,
+            content: await repoServer
+              .readFile(file.path)
+              .then((content) => truncateText(content, 900))
+              .catch(() => "")
+          }))
+        )
+      ]);
+      const testFileSnippets = await Promise.all(
+        searchHits.slice(0, 6).map(async (file) => ({
+          path: file.path,
+          content: await repoServer
+            .readFile(file.path)
+            .then((content) => truncateText(content, 900))
+            .catch(() => "")
+        }))
+      );
       return generateAdvisoryAgentOutput({
         provider,
         role: "test-writer",
@@ -553,7 +574,9 @@ export function createAdvisoryAgentToolkit(
         validator: (value) => testWriterOutputSchema.parse(value),
         prompt: renderTestWriterPrompt(input, provider.capabilities, {
           repoPath,
-          likelyTestFiles: searchHits.slice(0, 20)
+          likelyTestFiles: searchHits.slice(0, 20),
+          testFileSnippets: testFileSnippets.filter((file) => file.content.length > 0),
+          sourceFileSnippets: sourceFileSnippets.filter((file) => file.content.length > 0)
         }),
         ...(advisoryTimeouts?.["test-writer"] === undefined
           ? {}
@@ -1055,6 +1078,7 @@ Requirements:
 - For delete operations, omit content.
 - Explain risk and expected tests in the rationale.
 - Keep commands narrow and relevant.
+- Do not modify assistant-control files like \`.dev-assistant/\`, \`.git/\`, or \`dev-assistant.config.json\` unless the user explicitly asked for them.
 - If context is insufficient, say so clearly in rationale rather than inventing details.`
   };
 }
@@ -1095,7 +1119,8 @@ ${JSON.stringify(capabilities, null, 2)}
 Requirements:
 - Review only the proposed change and its likely impact.
 - Findings must be concrete and action-oriented.
-- Include filePath and line when the final diff supports it.
+- Every finding should include filePath and line when the final diff supports it.
+- Prefer zero findings over generic advice.
 - Approve only if the proposal seems safe enough for the next step.`
   };
 }
@@ -1193,11 +1218,13 @@ function renderTestWriterPrompt(
   context: {
     readonly repoPath: string;
     readonly likelyTestFiles: readonly { path: string; line: number; column: number; preview: string }[];
+    readonly testFileSnippets: readonly { path: string; content: string }[];
+    readonly sourceFileSnippets: readonly { path: string; content: string }[];
   }
 ): { readonly systemPrompt: string; readonly userPrompt: string } {
   return {
     systemPrompt: withRepositoryInjectionWarning(
-      "You are the test writer agent for a local-first development assistant. Identify focused coverage gaps and recommend narrow tests only. Avoid broad snapshot churn. Reply only with JSON matching the schema.",
+      "You are the test writer agent for a local-first development assistant. Identify focused coverage gaps and propose narrow test-only file changes when the provided context is sufficient. Avoid broad snapshot churn and do not edit implementation files. Reply only with JSON matching the schema.",
     ),
     userPrompt: `Repository: ${context.repoPath}
 Task:
@@ -1212,8 +1239,22 @@ ${JSON.stringify(input.proposal, null, 2)}
 Likely existing test files:
 ${JSON.stringify(context.likelyTestFiles, null, 2)}
 
+Existing test file snippets:
+${JSON.stringify(context.testFileSnippets, null, 2)}
+
+Relevant source snippets:
+${JSON.stringify(context.sourceFileSnippets, null, 2)}
+
 Model capabilities:
-${JSON.stringify(capabilities, null, 2)}`
+${JSON.stringify(capabilities, null, 2)}
+
+Requirements:
+- Recommend only narrow, behavior-focused tests.
+- When context is sufficient, populate files and operations with full intended test-file contents.
+- Only touch likely test files or create new test files.
+- Do not modify non-test implementation files.
+- Use commands only for narrow test commands when they are obvious from the repo context.
+- If context is insufficient, leave files, operations, and commands empty and explain the gap in coverageGaps or summary.`
   };
 }
 
@@ -1339,13 +1380,30 @@ async function gatherCodingContext(
     )
   ).flat();
 
+  const changedPaths = gitStatus
+    .split("\n")
+    .map((line) => line.trim().replace(/^[A-Z?]+\s+/, ""))
+    .filter((line) => line.length > 0 && !isAssistantControlPath(line));
+
+  const mentionedPaths = fileList
+    .filter((file) => file.kind === "file")
+    .map((file) => file.path)
+    .filter(
+      (path) =>
+        !isAssistantControlPath(path) &&
+        (prompt.includes(path) || prompt.includes(path.split("/").at(-1) ?? ""))
+    )
+    .slice(0, 8);
+
   const candidateFiles = Array.from(
     new Set([
+      ...mentionedPaths,
+      ...changedPaths,
       ...matches.map((match) => match.path),
       ...fileList.filter((file) => file.kind === "file").slice(0, 12).map((file) => file.path)
     ])
   )
-    .filter((path) => !path.includes(".dev-assistant/"))
+    .filter((path) => !isAssistantControlPath(path))
     .slice(0, Math.max(4, plan.steps.length * 2));
 
   const fileSnippets = await Promise.all(
@@ -1450,7 +1508,8 @@ ${JSON.stringify(capabilities, null, 2)}
 Requirements:
 - Approve only if the proposal seems consistent with the task.
 - Findings should be concrete and concise.
-- Include filePath and line when the final diff contains enough detail to support it.`
+- Every finding should include filePath and line when the final diff contains enough detail to support it.
+- Prefer zero findings over generic advice.`
   };
 }
 

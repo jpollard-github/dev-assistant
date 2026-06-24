@@ -134,7 +134,10 @@ export const testWriterOutputSchema = z.object({
       testName: z.string().min(1),
       rationale: z.string().min(1)
     })
-  )
+  ),
+  files: z.array(fileChangeSchema).default([]),
+  operations: z.array(fileOperationSchema).default([]),
+  commands: z.array(z.string().min(1)).default([])
 });
 
 export type TestWriterOutput = z.infer<typeof testWriterOutputSchema>;
@@ -202,7 +205,7 @@ export const advisoryAgentOutputJsonSchemas: Record<AdvisoryAgentRole, JsonSchem
     title: "TestWriterOutput",
     type: "object",
     additionalProperties: false,
-    required: ["summary", "coverageGaps", "recommendedTests"],
+    required: ["summary", "coverageGaps", "recommendedTests", "files", "operations", "commands"],
     properties: {
       summary: { type: "string", minLength: 1 },
       coverageGaps: {
@@ -221,6 +224,35 @@ export const advisoryAgentOutputJsonSchemas: Record<AdvisoryAgentRole, JsonSchem
             rationale: { type: "string", minLength: 1 }
           }
         }
+      },
+      files: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["path", "changeType"],
+          properties: {
+            path: { type: "string", minLength: 1 },
+            changeType: { type: "string", enum: ["create", "update", "delete"] }
+          }
+        }
+      },
+      operations: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["path", "changeType"],
+          properties: {
+            path: { type: "string", minLength: 1 },
+            changeType: { type: "string", enum: ["create", "update", "delete"] },
+            content: { type: "string" }
+          }
+        }
+      },
+      commands: {
+        type: "array",
+        items: { type: "string", minLength: 1 }
       }
     }
   },
@@ -460,3 +492,5 @@ export const agentOutputJsonSchemas: Record<AgentRole, JsonSchema> = {
     }
   }
 };
+
+export * from "./quality.js";

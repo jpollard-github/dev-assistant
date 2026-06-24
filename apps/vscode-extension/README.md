@@ -14,3 +14,4 @@ Runtime setup and end-to-end workflow guidance live in the repository root:
 - [`README.md`](../../README.md)
 - [`docs/local-model-runtimes.md`](../../docs/local-model-runtimes.md)
 - [`docs/example-workflows.md`](../../docs/example-workflows.md)
+- [`VSIX-TESTING.md`](../../VSIX-TESTING.md)

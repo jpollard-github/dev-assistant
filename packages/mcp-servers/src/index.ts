@@ -9,23 +9,18 @@ import { DatabaseSync } from "node:sqlite";
 import type { ShellCommandResult, ShellRunner } from "@dev-assistant/core";
 import type { FileOperation } from "@dev-assistant/agents";
 import {
+  debtStoreSchema,
+  debtItemInputSchema,
   containsLikelyDependencyInstallCommand,
   containsLikelyNetworkCommand,
   containsLikelyPackageScriptCommand,
   isLikelyBinaryContent,
   isSensitivePath,
-  redactString
-} from "@dev-assistant/shared";
-import {
-  debtStoreSchema,
-  debtItemInputSchema,
   mapPriorityToSeverity,
   rankDebtSeverity,
-  renderDebtItemsAsMarkdown,
-  type DebtItem,
-  type DebtItemInput,
-  type DebtStatus
-} from "../../shared/src/debt.js";
+  redactString
+} from "@dev-assistant/shared";
+import { renderDebtItemsAsMarkdown, type DebtItem, type DebtItemInput, type DebtStatus } from "@dev-assistant/shared";
 
 const execFileAsync = promisify(execFile);
 

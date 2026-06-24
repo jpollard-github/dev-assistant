@@ -214,10 +214,18 @@ class DevAssistantExtension {
       summary.output.coverageGaps.length > 0
         ? summary.output.coverageGaps.map((gap) => `- ${escapeMarkdown(gap)}`).join("\n")
         : "- No obvious gaps called out.";
+    const proposedFiles =
+      summary.output.files.length > 0
+        ? summary.output.files.map((file) => `- \`${file.path}\` (${file.changeType})`).join("\n")
+        : "- No concrete file edits were proposed.";
+    const commands =
+      summary.output.commands.length > 0
+        ? summary.output.commands.map((command) => `- \`${escapeMarkdown(command)}\``).join("\n")
+        : "- No follow-up test command was proposed.";
 
     await this.openMarkdownDocument(
       "test-recommendations",
-      `# Test Recommendations\n\n${escapeMarkdown(summary.output.summary)}\n\n## File\n\n- \`${summary.filePath}\`\n\n## Coverage Gaps\n\n${gaps}\n\n## Recommended Tests\n\n${recommendations}\n`
+      `# Test Recommendations\n\n${escapeMarkdown(summary.output.summary)}\n\n## File\n\n- \`${summary.filePath}\`\n\n## Coverage Gaps\n\n${gaps}\n\n## Recommended Tests\n\n${recommendations}\n\n## Proposed Test File Changes\n\n${proposedFiles}\n\n## Suggested Commands\n\n${commands}\n`
     );
   }
 

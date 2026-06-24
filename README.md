@@ -12,6 +12,33 @@ Additional setup and usage guides:
 
 - [Local Model Runtime Setup](/Users/jasonp/repos/dev-assistant/docs/local-model-runtimes.md)
 - [Example Workflows](/Users/jasonp/repos/dev-assistant/docs/example-workflows.md)
+- [VSIX Testing Guide](/Users/jasonp/repos/dev-assistant/VSIX-TESTING.md)
+
+## Intended Project Types
+
+Dev Assistant is intended first for small to medium-sized TypeScript repositories where a local or hybrid assistant can safely inspect code, propose focused patches, run targeted commands, and summarize review and test results.
+
+Projects it is a good fit for today:
+
+- TypeScript-only libraries and applications.
+- Node.js backends and API services.
+- Next.js applications, especially when the work is focused on routes, components, server actions, utilities, tests, or config.
+- VS Code extension projects, including command logic, extension wiring, configuration, and tests.
+- Monorepos that are still understandable through repo search, targeted context gathering, and configured test commands.
+
+Current guidance by project type:
+
+- Next.js: yes, this is a reasonable target. The assistant can help with App Router code, server/client component changes, route handlers, tests, refactors, and review, but you should still supervise framework-sensitive work like caching, rendering boundaries, deployment config, and auth flows.
+- TypeScript-only repos: yes, these are the strongest fit today and the main shape the current MVP is targeting.
+- VS Code extensions: yes, this repo itself is one example of that workflow, so the assistant is especially well suited to extension code, commands, views, configuration, and packaging tasks.
+- APIs: yes, especially TypeScript APIs built on common Node patterns. It should be useful for handlers, validation, service layers, tests, and review-oriented changes.
+
+Projects that are less ideal right now:
+
+- Very large polyglot repositories where context selection is still a major challenge.
+- Repositories that require broad autonomous changes across many packages at once.
+- High-risk production changes that depend on perfect reviewer precision or fully automatic test authoring.
+- Projects with unusual build/test environments that are hard to express through configured shell and test commands.
 
 ## Local-First Security Model
 

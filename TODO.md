@@ -10,7 +10,7 @@ This file is the planning source of truth for the repository.
 
 ## Current Status
 
-Current phase: Phase 13 substantially complete, with Phase 4 follow-up items and two deeper Phase 13 hardening items still open.
+Current phase: Phase 15 MVP closure is in progress, with Phase 4 reviewer/test-writer closure work and two deeper Phase 13 hardening items still open.
 
 What is implemented today:
 
@@ -33,14 +33,18 @@ What is implemented today:
 - Phase 11 now includes repository privacy settings, role-specific local/hosted routing defaults and overrides, hosted cost estimation before runs, actual token-usage/cost reporting in CLI outputs, and mirrored routing support in the VS Code extension.
 - Phase 12 now includes distributable CLI and VS Code packaging metadata/scripts, install and workflow docs, a first-run `doctor` command, SQLite schema migration support, and opt-in local crash reporting.
 - Phase 13 now includes hosted-routing secret preflight scans, explicit per-run acknowledgement for private repositories before hosted routing, crash-report retention and upload controls, binary/large-file quarantine for agent context, write-scope and branch-guard controls for patch application, tamper-evident task-event checksums, and shell policy controls for dependency installs and package scripts.
+- A first local-only pilot pass was run against disposable clones of `personal`, `mood-switcher`, and `spotify-export`; see `docs/pilot-validation-2026-06-24.md`.
+- A second local-only reviewer rerun against the same seeded pilot regressions now produces file-and-line citations in all three repos, and the CLI/VSIX reviewer path now enriches missing citations from diff context.
+- The test-writer advisory path now supports concrete file operations and command suggestions, and CLI/VSIX runs can merge focused test-file edits back into coder proposals.
+- Coder context selection and proposal sanitization now exclude assistant-control paths like `.dev-assistant/`, `.git/`, and `dev-assistant.config.json` unless the user explicitly asks for them.
 
 What that means for MVP:
 
 - The project has crossed into an early MVP-capable state for small, low-risk tasks in both the CLI and VS Code.
-- The biggest remaining unlocks are better reviewer precision in live runs and real test-writing/edit application.
+- The biggest remaining unlocks are stable end-to-end real-repo coding runs, broader reviewer precision validation beyond seeded regressions, and real test-writing/edit application.
 - Security posture is now materially stronger for local-first and hybrid use, with preflight hosted-export checks and tamper-evident local task history now in place.
 - The biggest remaining security gaps are disposable execution isolation for test/format flows, stronger supply-chain signing for release artifacts, and the still-open Phase 4 reviewer/test-writer quality work.
-- Recommendation: start supervised internal usage now from both the CLI and VS Code extension for small, reviewable tasks in trusted TypeScript repositories, but do not yet treat the reviewer or test-writer as a release gate.
+- Recommendation: start supervised internal usage now from both the CLI and VS Code extension for small, reviewable tasks in trusted TypeScript repositories, but do not yet treat the reviewer or test-writer as a release gate and expect local-model flakiness to surface occasionally.
 
 ## Implemented Decisions
 
@@ -68,8 +72,8 @@ What that means for MVP:
 
 ## Dependency Map
 
-- Remaining Phase 4 reviewer precision work now has baseline eval coverage, but still needs live prompt/model tuning plus stronger file-and-line citation consistency.
-- Remaining Phase 4 Test Writer implementation now has evaluation coverage, but still needs real test-authoring/apply workflow support instead of advisory output only.
+- Remaining Phase 4 reviewer precision work now has baseline eval coverage plus live citation enrichment, but still needs broader prompt/model tuning and usefulness checks on more varied diffs.
+- Remaining Phase 4 Test Writer implementation now has evaluation coverage plus concrete test-file operations, but still needs reliable end-to-end author/apply validation in real repos.
 - Technical debt tracking now has structured schema, deduplication, and confirmation flows; the main remaining follow-up is optional external sync and further quality tuning.
 - The Post-Phase 4 dynamic role selection follow-up now has evaluation fixtures, regression traces, and Phase 11 routing controls to build on.
 
@@ -248,16 +252,16 @@ This phase replaces the current stubbed shell/test execution path with real tool
   - [x] reads local context
   - [x] proposes a focused change
   - [x] explains risk and expected tests
-- [ ] Reviewer agent:
+- [x] Reviewer agent:
   - [x] reviews only the actual diff
   - [x] prioritizes correctness and regressions
-  - [ ] emits findings with file and line references
-  Note: Phase 8 now adds baseline review-quality eval coverage, but live file-and-line citation consistency still needs prompt/model tuning.
+  - [x] emits findings with file and line references
+  Note: Phase 8 now adds baseline review-quality eval coverage, and CLI/VSIX review flows now enrich missing file/line metadata from diff context. Remaining work is live usefulness tuning, not the baseline citation path itself.
 - [ ] Test Writer agent:
   - [x] identifies missing coverage
   - [ ] adds focused tests
   - [x] avoids broad snapshot churn
-  Note: Phase 8 now adds test-generation eval coverage, but the agent still recommends tests rather than authoring and applying them directly.
+  Note: Phase 8 now adds test-generation eval coverage, and the advisory path can now return concrete test-file operations and commands. The remaining gap is reliable end-to-end authoring and application in real repos.
 - [x] Architecture Review agent:
   - [x] checks boundaries, coupling, dependency direction, and migration risk
   - [x] produces recommendations, not automatic rewrites
@@ -662,14 +666,30 @@ This phase consolidates every still-open item from prior phases, milestones, cos
   Status: MVP blocker.
   Prerequisites: choose pilot repos, keep configs checked in or documented, capture run logs and outcome notes.
   Notes: this closes the open MVP item and is the main compatibility-risk reducer.
+  Current evidence:
+  - A first local-only pilot was completed on 2026-06-24 against `personal`, `mood-switcher`, and `spotify-export` using disposable temp clones.
+  - `personal` and `mood-switcher` are strong TypeScript representatives.
+  - A later third TypeScript-heavy pilot was completed against a disposable working-copy of `dev-assistant` itself because a plain git clone did not have a ready dependency bootstrap.
+  - The stronger TypeScript trio is now `personal`, `mood-switcher`, and `dev-assistant`.
+  - `spotify-export` remains useful edge-case coverage for local-data/script repos.
+  - See `docs/pilot-validation-2026-06-24.md`.
 - [ ] Make reviewer findings reliably actionable, including file-and-line references and fewer generic comments.
   Status: MVP blocker.
   Prerequisites: prompt tuning, citation-format enforcement, eval expansion for seeded review failures, live-run trace review.
   Notes: consolidates the remaining Phase 4 reviewer work and the open MVP review-quality item.
+  Current evidence:
+  - Pilot review runs caught seeded regressions in all three repos.
+  - A same-day second-pass reviewer rerun on fresh temp clones of `personal`, `mood-switcher`, and `spotify-export` produced correct findings with file and line references in all three repos.
+  - CLI and VSIX review flows now enrich missing file/line metadata from final diff context when the model omits it.
+  - Remaining gap: broader usefulness/precision validation on more varied diffs, plus resilience when the local model runtime is flaky.
 - [ ] Enable the Test Writer to author and apply focused tests for simple changes.
   Status: MVP blocker.
   Prerequisites: reuse the existing patch workflow, define test-writer write permissions, add evals for authored tests, verify narrow test execution.
   Notes: consolidates the remaining Phase 4 test-writer work and the open MVP test-authoring item.
+  Current evidence:
+  - The advisory test-writer now supports concrete `files`, `operations`, and `commands`, and CLI/VSIX runs can merge focused test-file edits into coder proposals.
+  - Coder proposals are now sanitized to remove assistant-control files that were not explicitly requested, which closes one real blocker found in pilot reruns.
+  - The end-to-end real-repo proof is still open: a fresh `personal` rerun intended to verify this hit a local Ollama `fetch failed` runtime error before the full flow could complete.
 - [ ] Add narrow-test planning before full-suite execution where possible.
   Status: Strong MVP improvement.
   Prerequisites: file-to-test heuristics, repo-specific test mapping, CLI/VSIX surfacing for the selected narrow scope.
@@ -678,10 +698,35 @@ This phase consolidates every still-open item from prior phases, milestones, cos
   Status: Strong MVP improvement.
   Prerequisites: context-ranking logic, prompt/context plumbing, eval checks for missed context.
   Notes: closes an open cost-control item and helps both quality and cost.
+  Current evidence:
+  - Candidate-file selection now prioritizes prompt-mentioned files and changed files, and excludes assistant-control paths.
+  - Remaining gap: better ranking and pruning beyond these baseline heuristics.
 - [ ] Store per-task cost and runtime metrics in local state and surface them in CLI/VSIX history.
   Status: Strong MVP improvement.
   Prerequisites: task-store schema extension, report formatting, JSON output updates.
   Notes: closes the open cost-control item and gives us operational feedback for pilots.
+- [ ] Add automated smoke tests for packaged CLI execution against external working directories.
+  Status: MVP blocker.
+  Prerequisites: package-safe runtime imports, workspace-independent launch path, test harness that runs the built CLI against temp repos.
+  Notes: the 2026-06-24 pilot surfaced real external-repo packaging/runtime bugs that existing in-repo tests did not catch.
+- [ ] Add automated smoke tests for the built VS Code extension against disposable pilot workspaces.
+  Status: Strong MVP improvement.
+  Prerequisites: VSIX packaging hook, extension-host automation or documented manual harness, pilot fixture workspaces.
+  Notes: this is the fastest way to keep CLI and VSIX behavior aligned once manual pilot coverage exists.
+- [ ] Tighten runtime-budget enforcement and document realistic local-model latency expectations.
+  Status: Strong MVP improvement.
+  Prerequisites: inspect how `maxRuntimeMs` is enforced across multi-role runs, collect pilot timing data, decide whether to stop earlier or report soft overages more clearly.
+  Notes: the first full local-only pilot run exceeded the nominal 60s runtime budget in practice.
+  Current evidence:
+  - The self-repo third-pilot rerun progressed through more roles after proposal-normalization fixes, then still blocked because runtime reached about 63s against the current 60s cap before tests could run.
+- [ ] Improve coder patch quality for focused real-repo fixes so reviewer rejection is about real logic issues rather than malformed or low-fidelity rewrites.
+  Status: MVP blocker.
+  Prerequisites: tighter source-file grounding, diff-size control, file-content fidelity checks, real-repo regression fixtures from pilots.
+  Notes: the blocker has shifted from assistant-control-path noise and file/operation mismatches toward patch quality itself.
+- [ ] Make external-repo onboarding smoother for monorepos and local-only clones, especially when dependencies are not installed yet.
+  Status: Strong MVP improvement.
+  Prerequisites: better doctor guidance, bootstrap docs, maybe copy-safe or offline-friendly setup suggestions, interface hints in CLI/VSIX.
+  Notes: the self-repo pilot showed that a plain clone was not immediately runnable for configured tests without dependency bootstrap.
 - [ ] Cache repository summaries or other reusable repo-level context.
   Status: Future optimization, not required for MVP.
   Prerequisites: invalidation strategy, repo-fingerprint logic, summary quality checks.
@@ -726,10 +771,16 @@ This phase consolidates every still-open item from prior phases, milestones, cos
   Status: Future integration, not required for MVP.
   Prerequisites: issue schema mapping, auth flow, duplicate sync strategy, user demand.
   Notes: preserve the current local-first debt flow as the baseline.
+- [ ] Run a hosted or hybrid pilot using OpenAI after the local-only pass is stable.
+  Status: Future validation phase, not required before local-only MVP.
+  Prerequisites: close the highest-risk local-only MVP blockers first, decide which repos are safe for hosted routing, configure pricing limits and repository privacy, verify preflight secret scanning behavior.
+  Notes: requested after the first local-only pilot pass.
 
 ## Definition Of Done For MVP
 
 - [ ] Can run against at least three real TypeScript repositories.
+- [ ] Can run against at least three real TypeScript repositories.
+  Note: CLI-side evidence now covers `personal`, `mood-switcher`, and `dev-assistant`; keep this open until manual VSIX coverage is captured on the same trio.
 - [x] Can complete small bug-fix tasks with human approval.
 - [ ] Produces review findings that are sometimes genuinely useful.
 - [ ] Can add or update tests for simple changes.
@@ -759,9 +810,22 @@ Practical go/no-go recommendation:
 - VS Code extension: ready for supervised internal use now on small, low-risk tasks.
 - Broad MVP sign-off: not yet, until the three open MVP checklist items are closed.
 
+Latest closure status:
+
+1. Close the remaining reviewer-quality work.
+Status: materially improved, but keep open until the next manual VSIX pass and third TypeScript repo confirm the same quality outside the current seeded reruns.
+2. Close the remaining test-writer implementation work.
+Status: partially completed in code, but keep open until a real-repo end-to-end run safely authors or applies focused tests and gets through review/test execution.
+3. Validate on three real TypeScript repositories.
+Status: CLI evidence now covers `personal`, `mood-switcher`, and `dev-assistant`; manual VSIX validation on the same trio is the remaining closure step.
+
 ## Pilot Validation Program
 
 Use this program to generate the next round of issues and decide whether Phase 15 is truly complete.
+
+Reference:
+
+- `docs/pilot-validation-2026-06-24.md`
 
 Automatic validation to add or expand:
 
@@ -772,6 +836,8 @@ Automatic validation to add or expand:
 - [ ] Cost-and-runtime regression checks for common `run`, `review`, and `test` flows.
 - [ ] Malicious-repo fixtures for prompt injection, hidden secrets, large files, and dangerous package scripts.
 - [ ] CLI/VSIX golden-output tests for approval prompts, hosted-routing warnings, and failure summaries.
+- [ ] Packaged CLI smoke tests that run from outside the monorepo root against temp-cloned repos.
+- [ ] Runtime-budget regression checks that fail when local-only runs drift too far beyond configured limits.
 
 Manual validation to run:
 
@@ -782,6 +848,22 @@ Manual validation to run:
 - [ ] Repo onboarding flow on different layouts: pnpm monorepo, npm single-package app, and mixed test frameworks.
 - [ ] Hosted/hybrid confirmation flow in a private repository with intentionally placed secret-like files.
 - [ ] Recovery flow after cancelled tasks, failed tests, and partially applied patches.
+- [ ] Re-run the local-only pilot after coder patch-safety fixes and compare against `docs/pilot-validation-2026-06-24.md`.
+
+Manual VSIX testing to do next:
+
+- [ ] Follow [VSIX-TESTING.md](/Users/jasonp/repos/dev-assistant/VSIX-TESTING.md) for packaging, install/uninstall, disposable workspace creation, seeded regressions, and evidence capture.
+- [ ] Use disposable clones of `personal` and `mood-switcher`, then use a disposable working-tree copy of this repo for the third TypeScript pilot workspace so local dependencies are already present.
+- [ ] In `personal`, run Review Current Diff on the seeded `app/music/shared.tsx` regression and confirm the result includes a concrete file and line.
+- [ ] In `mood-switcher`, run Review Current Diff on the seeded `src/extension.ts` regression and confirm the result includes a concrete file and line.
+- [ ] In `dev-assistant`, run Review Current Diff on the seeded `packages/shared/src/model-routing.ts` regression and confirm the result includes a concrete file and line.
+- [ ] In `personal` and `mood-switcher`, run one small coding task and confirm the patch preview no longer proposes edits under `.dev-assistant/`, `.git/`, or `dev-assistant.config.json` unless you explicitly asked for them.
+- [ ] In `dev-assistant`, optionally run one small coding task and compare the extension behavior with the latest CLI pilot notes.
+- [ ] In the same VSIX sessions, run Generate Tests For Current File and confirm the output now includes proposed test files and suggested test commands, not only prose recommendations.
+- [ ] Confirm approval UI wording is clear for both file edits and shell commands, especially after a reviewer rejection or blocked run.
+- [ ] Confirm the task timeline/history is readable during a full run and does not become too noisy.
+- [ ] Confirm local-only privacy messaging stays clear and that no hosted-routing acknowledgement is shown unless you intentionally enable hosted routing.
+- [ ] If the local model runtime throws `fetch failed` or similar transient errors, record the repo, command, timestamp, and any VS Code developer-console output so we can separate product issues from Ollama/runtime instability.
 
 ## TODO Part 2: Tentative Enhancements
 

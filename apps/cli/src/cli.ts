@@ -4,7 +4,17 @@ import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 
-import { parseAgentOutput, type AgentOutputMap, type CoderOutput } from "@dev-assistant/agents";
+import {
+  enrichReviewerOutput,
+  mergeTestWriterIntoCoderProposal,
+  parseAdvisoryAgentOutput,
+  parseAgentOutput,
+  reconcileCoderProposal,
+  sanitizeCoderProposal,
+  type AdvisoryAgentOutputMap,
+  type AgentOutputMap,
+  type CoderOutput
+} from "@dev-assistant/agents";
 import {
   TaskCoordinator,
   SqliteTaskEventStore,
@@ -682,7 +692,20 @@ function createModelCommandContext(jsonMode: boolean): ModelCommandContext {
     maxContextFileBytes: base.config.security.maxContextFileBytes
   });
   const gitServer = createGitMcpServer(base.repoPath);
-  const agents = createCapabilityBackedAgentHandlers({
+  const advisoryToolkit = createAdvisoryAgentToolkit({
+    providerForRole,
+    repoPath: base.repoPath,
+    repoServer,
+    gitServer,
+    testServer: base.testServer,
+    memoryServer: base.memoryServer,
+    advisoryTimeouts: {
+      "test-writer": 20_000,
+      "architecture-review": 20_000,
+      "technical-debt": 20_000
+    }
+  });
+  const agents = createAugmentedAgentHandlers(base.repoPath, base.config.testCommands, createCapabilityBackedAgentHandlers({
     providerForRole,
     repoPath: base.repoPath,
     repoServer,
@@ -701,21 +724,7 @@ function createModelCommandContext(jsonMode: boolean): ModelCommandContext {
       "architecture-review": 20_000,
       "technical-debt": 20_000
     }
-  });
-  const advisoryToolkit = createAdvisoryAgentToolkit({
-    providerForRole,
-    repoPath: base.repoPath,
-    repoServer,
-    gitServer,
-    testServer: base.testServer,
-    memoryServer: base.memoryServer,
-    advisoryTimeouts: {
-      "test-writer": 20_000,
-      "architecture-review": 20_000,
-      "technical-debt": 20_000
-    }
-  });
-
+  }), advisoryToolkit);
   return {
     ...base,
     agents,
@@ -816,7 +825,8 @@ async function buildAdvisorySummary(
   });
 
   const testWriter =
-    result.outputs.coordinator.requiresTests || result.outputs.coder.files.length > 0
+    (result.outputs.coordinator.requiresTests || result.outputs.coder.files.length > 0) &&
+    !result.outputs.coder.files.some((file) => isLikelyTestPath(file.path))
       ? await context.advisoryToolkit.testWriter({
           taskId: result.task.id,
           prompt,
@@ -1358,6 +1368,114 @@ function normalizeAgentOutput<TRole extends keyof AgentOutputMap>(
   }
 
   return parseAgentOutput(role, value);
+}
+
+function normalizeAdvisoryOutput<TRole extends keyof AdvisoryAgentOutputMap>(
+  role: TRole,
+  value: { output: AdvisoryAgentOutputMap[TRole] } | AgentExecutionEnvelope
+): AdvisoryAgentOutputMap[TRole] {
+  if (typeof value === "object" && value !== null && "output" in value) {
+    return parseAdvisoryAgentOutput(role, (value as AgentExecutionEnvelope).output);
+  }
+
+  return parseAdvisoryAgentOutput(role, (value as { output: AdvisoryAgentOutputMap[TRole] }).output);
+}
+
+function createAugmentedAgentHandlers(
+  repoPath: string,
+  testCommands: readonly string[],
+  agents: ReturnType<typeof createCapabilityBackedAgentHandlers>,
+  advisoryToolkit: ReturnType<typeof createAdvisoryAgentToolkit>
+): ReturnType<typeof createCapabilityBackedAgentHandlers> {
+  return {
+    ...agents,
+    async coder(input) {
+      const raw = await agents.coder(input);
+      const proposal = normalizeCoderProposalPaths(
+        repoPath,
+        sanitizeCoderProposal(normalizeAgentOutput("coder", raw), input.prompt)
+      );
+
+      if (!shouldAugmentProposalWithTests(proposal, testCommands)) {
+        return replaceEnvelopeOutput(raw, proposal);
+      }
+
+      try {
+        const testWriterRaw = await advisoryToolkit.testWriter({
+          taskId: input.taskId,
+          prompt: input.prompt,
+          plan: input.plan,
+          proposal
+        });
+
+        const merged = mergeTestWriterIntoCoderProposal(
+          proposal,
+          normalizeAdvisoryOutput("test-writer", testWriterRaw)
+        );
+
+        return replaceEnvelopeOutput(raw, normalizeCoderProposalPaths(repoPath, merged));
+      } catch {
+        return replaceEnvelopeOutput(raw, proposal);
+      }
+    },
+    async reviewer(input) {
+      const raw = await agents.reviewer(input);
+      const review = normalizeAgentOutput("reviewer", raw);
+      const changedPaths =
+        input.patchResult.changedFiles.length > 0
+          ? input.patchResult.changedFiles.map((path) => toRepoRelativePath(repoPath, path))
+          : input.proposal.files.map((file) => file.path);
+      const enhanced = enrichReviewerOutput(review, input.patchResult.finalDiff, changedPaths);
+      return replaceEnvelopeOutput(raw, enhanced);
+    }
+  };
+}
+
+function shouldAugmentProposalWithTests(
+  proposal: CoderOutput,
+  testCommands: readonly string[]
+): boolean {
+  return (
+    testCommands.length > 0 &&
+    proposal.operations.length > 0 &&
+    !proposal.files.some((file) => isLikelyTestPath(file.path))
+  );
+}
+
+function isLikelyTestPath(path: string): boolean {
+  return /(^|\/)(test|tests|__tests__)(\/|$)|\.(test|spec)\.[cm]?[jt]sx?$/i.test(path);
+}
+
+function replaceEnvelopeOutput<TOutput>(
+  value: unknown | AgentExecutionEnvelope,
+  output: TOutput
+): TOutput | AgentExecutionEnvelope {
+  if (typeof value === "object" && value !== null && "output" in value) {
+    return {
+      ...(value as AgentExecutionEnvelope),
+      output
+    };
+  }
+
+  return output;
+}
+
+function normalizeCoderProposalPaths(repoPath: string, proposal: CoderOutput): CoderOutput {
+  return reconcileCoderProposal({
+    ...proposal,
+    files: proposal.files.map((file) => ({
+      ...file,
+      path: toRepoRelativePath(repoPath, file.path)
+    })),
+    operations: proposal.operations.map((operation) => ({
+      ...operation,
+      path: toRepoRelativePath(repoPath, operation.path)
+    }))
+  });
+}
+
+function toRepoRelativePath(repoPath: string, path: string): string {
+  return path.startsWith(repoPath) ? path.slice(repoPath.length).replace(/^\/+/, "") : path;
 }
 
 

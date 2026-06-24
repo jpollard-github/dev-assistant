@@ -3,7 +3,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import type { AgentOutputMap, AdvisoryAgentOutputMap, CoderOutput } from "@dev-assistant/agents";
-import { parseAgentOutput, parseAdvisoryAgentOutput } from "@dev-assistant/agents";
+import {
+  enrichReviewerOutput,
+  mergeTestWriterIntoCoderProposal,
+  parseAgentOutput,
+  parseAdvisoryAgentOutput,
+  reconcileCoderProposal,
+  sanitizeCoderProposal
+} from "@dev-assistant/agents";
 import { SqliteTaskEventStore, TaskCoordinator, type AgentExecutionEnvelope, type ApprovalDecision, type ApprovalRequest, type TaskEvent, type TaskRunResult } from "@dev-assistant/core";
 import {
   createAdvisoryAgentToolkit,
@@ -385,26 +392,6 @@ export class LocalWorkspaceService {
   private createModelContext() {
     const base = this.createBaseContext();
     const providerForRole = createProviderResolver(base.config);
-    const agents = createCapabilityBackedAgentHandlers({
-      providerForRole,
-      repoPath: base.repoPath,
-      repoServer: base.repoServer,
-      gitServer: base.gitServer,
-      testServer: base.testServer,
-      memoryServer: base.memoryServer,
-      timeouts: {
-        coordinator: 20_000,
-        coder: 45_000,
-        reviewer: 30_000,
-        "test-runner": 20_000,
-        "coordinator-report": 20_000
-      },
-      advisoryTimeouts: {
-        "test-writer": 20_000,
-        "architecture-review": 20_000,
-        "technical-debt": 20_000
-      }
-    });
     const advisoryToolkit = createAdvisoryAgentToolkit({
       providerForRole,
       repoPath: base.repoPath,
@@ -418,6 +405,31 @@ export class LocalWorkspaceService {
         "technical-debt": 20_000
       }
     });
+    const agents = createAugmentedAgentHandlers(
+      base.repoPath,
+      base.config.testCommands,
+      createCapabilityBackedAgentHandlers({
+        providerForRole,
+        repoPath: base.repoPath,
+        repoServer: base.repoServer,
+        gitServer: base.gitServer,
+        testServer: base.testServer,
+        memoryServer: base.memoryServer,
+        timeouts: {
+          coordinator: 20_000,
+          coder: 45_000,
+          reviewer: 30_000,
+          "test-runner": 20_000,
+          "coordinator-report": 20_000
+        },
+        advisoryTimeouts: {
+          "test-writer": 20_000,
+          "architecture-review": 20_000,
+          "technical-debt": 20_000
+        }
+      }),
+      advisoryToolkit
+    );
 
     return {
       ...base,
@@ -546,6 +558,99 @@ function isEnvelope(value: unknown): value is AgentExecutionEnvelope {
   return typeof value === "object" && value !== null && "output" in value;
 }
 
+function createAugmentedAgentHandlers(
+  repoPath: string,
+  testCommands: readonly string[],
+  agents: ReturnType<typeof createCapabilityBackedAgentHandlers>,
+  advisoryToolkit: ReturnType<typeof createAdvisoryAgentToolkit>
+): ReturnType<typeof createCapabilityBackedAgentHandlers> {
+  return {
+    ...agents,
+    async coder(input) {
+      const raw = await agents.coder(input);
+      const proposal = normalizeCoderProposalPaths(
+        repoPath,
+        sanitizeCoderProposal(normalizeAgentOutput("coder", raw), input.prompt)
+      );
+
+      if (!shouldAugmentProposalWithTests(proposal, testCommands)) {
+        return replaceEnvelopeOutput(raw, proposal);
+      }
+
+      try {
+        const testWriterRaw = await advisoryToolkit.testWriter({
+          taskId: input.taskId,
+          prompt: input.prompt,
+          plan: input.plan,
+          proposal
+        });
+
+        const merged = mergeTestWriterIntoCoderProposal(
+          proposal,
+          normalizeAdvisoryOutput("test-writer", testWriterRaw)
+        );
+
+        return replaceEnvelopeOutput(raw, normalizeCoderProposalPaths(repoPath, merged));
+      } catch {
+        return replaceEnvelopeOutput(raw, proposal);
+      }
+    },
+    async reviewer(input) {
+      const raw = await agents.reviewer(input);
+      const review = normalizeAgentOutput("reviewer", raw);
+      const changedPaths =
+        input.patchResult.changedFiles.length > 0
+          ? input.patchResult.changedFiles.map((path) => toRepoRelativePath(repoPath, path))
+          : input.proposal.files.map((file) => file.path);
+      const enhanced = enrichReviewerOutput(review, input.patchResult.finalDiff, changedPaths);
+      return replaceEnvelopeOutput(raw, enhanced);
+    }
+  };
+}
+
+function shouldAugmentProposalWithTests(
+  proposal: CoderOutput,
+  testCommands: readonly string[]
+): boolean {
+  return (
+    testCommands.length > 0 &&
+    proposal.operations.length > 0 &&
+    !proposal.files.some((file) => isLikelyTestPath(file.path))
+  );
+}
+
+function isLikelyTestPath(path: string): boolean {
+  return /(^|\/)(test|tests|__tests__)(\/|$)|\.(test|spec)\.[cm]?[jt]sx?$/i.test(path);
+}
+
+function replaceEnvelopeOutput<TOutput>(
+  value: unknown | AgentExecutionEnvelope,
+  output: TOutput
+): TOutput | AgentExecutionEnvelope {
+  if (isEnvelope(value)) {
+    return {
+      ...value,
+      output
+    };
+  }
+
+  return output;
+}
+
+function normalizeCoderProposalPaths(repoPath: string, proposal: CoderOutput): CoderOutput {
+  return reconcileCoderProposal({
+    ...proposal,
+    files: proposal.files.map((file) => ({
+      ...file,
+      path: toRepoRelativePath(repoPath, file.path)
+    })),
+    operations: proposal.operations.map((operation) => ({
+      ...operation,
+      path: toRepoRelativePath(repoPath, operation.path)
+    }))
+  });
+}
+
 function parseDiffFiles(diff: string): string[] {
   return [
     ...new Set(
@@ -562,6 +667,10 @@ function resolveRelativePath(workspacePath: string, filePath: string): string {
   return filePath.startsWith(workspacePath)
     ? filePath.slice(workspacePath.length).replace(/^\/+/, "")
     : filePath;
+}
+
+function toRepoRelativePath(repoPath: string, filePath: string): string {
+  return filePath.startsWith(repoPath) ? filePath.slice(repoPath.length).replace(/^\/+/, "") : filePath;
 }
 
 function buildSingleFileProposal(filePath: string, content: string, diff: string): CoderOutput {
