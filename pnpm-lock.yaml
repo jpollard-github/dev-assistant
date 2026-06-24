@@ -35,6 +35,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@dev-assistant/agents':
+        specifier: workspace:*
+        version: link:../../packages/agents
       '@dev-assistant/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -123,6 +126,9 @@ importers:
 
   packages/mcp-servers:
     dependencies:
+      '@dev-assistant/agents':
+        specifier: workspace:*
+        version: link:../agents
       '@dev-assistant/core':
         specifier: workspace:*
         version: link:../core

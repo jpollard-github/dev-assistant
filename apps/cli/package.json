@@ -13,6 +13,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@dev-assistant/agents": "workspace:*",
     "@dev-assistant/core": "workspace:*",
     "@dev-assistant/llm": "workspace:*",
     "@dev-assistant/mcp-servers": "workspace:*",

@@ -4,7 +4,7 @@ Dev Assistant is a local-first multi-agent development assistant. The goal is to
 
 ## Current Status
 
-This repository is in Phase 5: patch workflow. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted fallback support for hybrid mode, local repo/git/shell/test/memory capability servers, capability-backed advisory outputs for test writing, architecture review, and technical debt tracking, plus a real structured patch-application path with validation and final task reporting.
+This repository is in Phase 6: CLI experience. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted fallback support for hybrid mode, local repo/git/shell/test/memory capability servers, capability-backed advisory outputs for test writing, architecture review, and technical debt tracking, a real structured patch-application path with validation and final task reporting, and a fuller CLI with review, history, debt, doctor, dry-run, and JSON output support.
 
 Roadmap, phase progress, milestones, MVP definition of done, and project decisions now live in [TODO.md](/Users/jasonp/repos/dev-assistant/TODO.md).
 
@@ -63,6 +63,32 @@ Run the current CLI task flow:
 ```sh
 corepack pnpm build
 node apps/cli/dist/index.js run "describe the task"
+```
+
+Useful CLI commands:
+
+```sh
+# create a starter config file
+node apps/cli/dist/index.js init
+
+# inspect config health
+node apps/cli/dist/index.js config doctor
+
+# review the current git diff
+node apps/cli/dist/index.js review
+
+# run configured tests and summarize them
+node apps/cli/dist/index.js test
+
+# preview a task without applying edits
+node apps/cli/dist/index.js run "describe the task" --dry-run
+
+# inspect debt and history
+node apps/cli/dist/index.js debt list
+node apps/cli/dist/index.js history
+
+# emit machine-readable JSON
+node apps/cli/dist/index.js review --json
 ```
 
 Start Ollama and install a model:
@@ -151,6 +177,12 @@ Optional hybrid fallback example:
 
 In `hybrid` mode, the assistant tries Ollama first and falls back to the hosted provider if the local model call fails. In `hosted` mode, set `"model.provider": "hosted"` and keep the `hosted` block populated.
 
+Notes:
+
+- Any command listed in `formatCommands` or `testCommands` should also appear in `allowedShellCommands`, because the shell/test path still enforces the allowlist.
+- Commands like `history`, `debt list`, `debt add`, `config doctor`, and `test` do not require Ollama to be running.
+- Commands like `run` and `review` still rely on the configured model provider.
+
 ## Development
 
 ```sh
@@ -165,9 +197,10 @@ corepack pnpm build
 - `dev-assistant run` now uses the configured Ollama model for structured agent outputs, and it can optionally fall back to a hosted Chat Completions compatible endpoint in `hybrid` mode.
 - Structured coder outputs now drive a real patch workflow with repo-bound validation, optional format commands, reviewer inspection of the final diff, and a final coordinator report.
 - Configured allowlisted test commands now run through the real shell/test path.
+- The CLI now supports `init`, `review`, `test`, `debt list`, `debt add`, `history`, `config doctor`, `--dry-run`, interactive approvals, and `--json` output.
 - Advisory outputs now include test-writing recommendations, architecture review recommendations, and automatic technical debt entries written to `.dev-assistant/debt.md`.
 - Reviewer findings are still inconsistent about file-and-line references on local models.
 - The Test Writer is still advisory only; it recommends tests but does not apply them yet.
 - Technical debt logging is still noisy and needs deduplication before it is MVP-done.
 - Hosted fallback support is implemented and unit-tested, but it was not live-validated here because no hosted credentials were configured in this repo.
-- A blocked task is currently reported in the JSON result, but the CLI does not yet turn that into a non-zero process exit code.
+- A blocked task is currently reported in the JSON result, but the CLI still exits with code `0` unless a command-level exception is thrown.

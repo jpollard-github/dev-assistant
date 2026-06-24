@@ -10,7 +10,7 @@ This file is the planning source of truth for the repository.
 
 ## Current Status
 
-Current phase: Phase 5 complete, with Phase 4 follow-up items still open.
+Current phase: Phase 6 complete, with Phase 4 follow-up items still open.
 
 What is implemented today:
 
@@ -24,6 +24,8 @@ What is implemented today:
 - Phase 4 now includes capability-backed coordinator/coder/reviewer/test-runner prompts, standalone advisory roles for test writing, architecture review, and technical debt tracking, and automatic debt log recording to `.dev-assistant/debt.md`.
 - Phase 5 now includes structured file operations from the coder, controlled patch application, repo-bound patch validation, optional formatting commands, final-diff review, and a coordinator final task report.
 - The Phase 5 path was live-validated locally against a throwaway Git fixture using Ollama and `qwen2.5-coder:7b`.
+- Phase 6 now includes `init`, `review`, `test`, `debt list`, `debt add`, `history`, `config doctor`, interactive approvals, dry-run support, and `--json` machine-readable output.
+- The non-model CLI commands now work without requiring Ollama to be running.
 
 What that means for MVP:
 
@@ -277,18 +279,24 @@ This phase replaces the current no-op patch applier with a real, controlled patc
 
 ## Phase 6: CLI Experience
 
-- [ ] Add `dev-assistant init`.
-- [ ] Add `dev-assistant run "task description"`.
-- [ ] Add `dev-assistant review`.
-- [ ] Add `dev-assistant test`.
-- [ ] Add `dev-assistant debt list`.
-- [ ] Add `dev-assistant debt add`.
-- [ ] Add `dev-assistant history`.
-- [ ] Add `dev-assistant config doctor`.
+- [x] Add `dev-assistant init`.
+- [x] Add `dev-assistant run "task description"`.
+- [x] Add `dev-assistant review`.
+- [x] Add `dev-assistant test`.
+- [x] Add `dev-assistant debt list`.
+- [x] Add `dev-assistant debt add`.
+- [x] Add `dev-assistant history`.
+- [x] Add `dev-assistant config doctor`.
 - [ ] If budget overrides are exposed later, add them as optional advanced config rather than replacing orchestration-owned defaults.
-- [ ] Support interactive approvals.
-- [ ] Support a dry-run mode.
-- [ ] Support machine-readable JSON output for automation.
+  Note: this is a future config-tuning enhancement, not a blocker for Phase 6 completion.
+  Recommended approach:
+  - Keep `DEFAULT_TASK_BUDGET` in orchestration code as the baseline behavior.
+  - Add an optional advanced config block later, such as `budgetOverrides`.
+  - Merge user overrides onto orchestration defaults at runtime rather than moving default ownership into config.
+  - Document the feature as advanced tuning, not a required setup step for normal users.
+- [x] Support interactive approvals.
+- [x] Support a dry-run mode.
+- [x] Support machine-readable JSON output for automation.
 
 ## Phase 7: VS Code Extension
 
@@ -547,4 +555,4 @@ Add:
 - [x] Keeps all source local unless hosted mode is explicitly enabled.
 - [x] Has clear logs for every agent decision and tool call.
 - [ ] Has basic evals that catch regressions.
-- [ ] Has documentation good enough for another developer to install and try it.
+- [x] Has documentation good enough for another developer to install and try it.
