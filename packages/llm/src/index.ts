@@ -89,8 +89,12 @@ export interface OllamaProviderOptions {
   readonly capabilities?: ModelCapabilityMetadata;
 }
 
-export interface LocalAgentOptions {
-  readonly provider: LocalModelProvider;
+interface RoleAwareProviderOptions {
+  readonly provider?: LocalModelProvider;
+  readonly providerForRole?: (role: AgentRole | AdvisoryAgentRole) => LocalModelProvider;
+}
+
+export interface LocalAgentOptions extends RoleAwareProviderOptions {
   readonly timeouts?: Partial<Record<AgentRole, number>>;
 }
 
@@ -335,10 +339,12 @@ export function createFallbackProvider(
 }
 
 export function createLocalAgentHandlers(options: LocalAgentOptions): AgentHandlers {
-  const { provider, timeouts } = options;
+  const { timeouts } = options;
+  const providerForRole = createRoleProviderResolver(options);
 
   return {
     async coordinator(input) {
+      const provider = providerForRole("coordinator");
       return generateStructuredAgentOutput({
         provider,
         role: "coordinator",
@@ -349,6 +355,7 @@ export function createLocalAgentHandlers(options: LocalAgentOptions): AgentHandl
       });
     },
     async coder(input) {
+      const provider = providerForRole("coder");
       return generateStructuredAgentOutput({
         provider,
         role: "coder",
@@ -359,6 +366,7 @@ export function createLocalAgentHandlers(options: LocalAgentOptions): AgentHandl
       });
     },
     async reviewer(input) {
+      const provider = providerForRole("reviewer");
       return generateStructuredAgentOutput({
         provider,
         role: "reviewer",
@@ -386,6 +394,7 @@ export function createLocalAgentHandlers(options: LocalAgentOptions): AgentHandl
         };
       }
 
+      const provider = providerForRole("test-runner");
       return generateStructuredAgentOutput({
         provider,
         role: "test-runner",
@@ -398,6 +407,7 @@ export function createLocalAgentHandlers(options: LocalAgentOptions): AgentHandl
       });
     },
     async "coordinator-report"(input) {
+      const provider = providerForRole("coordinator-report");
       return generateStructuredAgentOutput({
         provider,
         role: "coordinator-report",
@@ -415,10 +425,12 @@ export function createLocalAgentHandlers(options: LocalAgentOptions): AgentHandl
 export function createCapabilityBackedAgentHandlers(
   options: CapabilityBackedAgentOptions
 ): AgentHandlers {
-  const { provider, timeouts, repoServer, gitServer, testServer, memoryServer, repoPath } = options;
+  const { timeouts, repoServer, gitServer, testServer, memoryServer, repoPath } = options;
+  const providerForRole = createRoleProviderResolver(options);
 
   return {
     async coordinator(input) {
+      const provider = providerForRole("coordinator");
       const [branch, status, repoFacts, failures] = await Promise.all([
         gitServer.currentBranch(),
         gitServer.status(),
@@ -441,6 +453,7 @@ export function createCapabilityBackedAgentHandlers(
       });
     },
     async coder(input) {
+      const provider = providerForRole("coder");
       const context = await gatherCodingContext(repoServer, gitServer, input.prompt, input.plan);
       return generateStructuredAgentOutput({
         provider,
@@ -452,6 +465,7 @@ export function createCapabilityBackedAgentHandlers(
       });
     },
     async reviewer(input) {
+      const provider = providerForRole("reviewer");
       const [gitDiff, failures] = await Promise.all([
         gitServer.diff(),
         memoryServer.listRecurringFailurePatterns(5)
@@ -486,6 +500,7 @@ export function createCapabilityBackedAgentHandlers(
         };
       }
 
+      const provider = providerForRole("test-runner");
       const packageManager = await testServer.discoverPackageManager();
       const parsedResults = input.commands.map((command) =>
         testServer.parseCommonTestOutput(command)
@@ -506,6 +521,7 @@ export function createCapabilityBackedAgentHandlers(
       });
     },
     async "coordinator-report"(input) {
+      const provider = providerForRole("coordinator-report");
       return generateStructuredAgentOutput({
         provider,
         role: "coordinator-report",
@@ -523,10 +539,12 @@ export function createCapabilityBackedAgentHandlers(
 export function createAdvisoryAgentToolkit(
   options: CapabilityBackedAgentOptions
 ): AdvisoryAgentToolkit {
-  const { provider, repoServer, gitServer, memoryServer, repoPath, advisoryTimeouts } = options;
+  const { repoServer, gitServer, memoryServer, repoPath, advisoryTimeouts } = options;
+  const providerForRole = createRoleProviderResolver(options);
 
   return {
     async testWriter(input) {
+      const provider = providerForRole("test-writer");
       const searchHits = await repoServer.search("test");
       return generateAdvisoryAgentOutput({
         provider,
@@ -543,6 +561,7 @@ export function createAdvisoryAgentToolkit(
       });
     },
     async architectureReview(input) {
+      const provider = providerForRole("architecture-review");
       const [files, branch] = await Promise.all([
         repoServer.listFiles({ recursive: false }),
         gitServer.currentBranch()
@@ -563,6 +582,7 @@ export function createAdvisoryAgentToolkit(
       });
     },
     async technicalDebt(input) {
+      const provider = providerForRole("technical-debt");
       const existingDebt = await memoryServer.readDebtLog();
       return generateAdvisoryAgentOutput({
         provider,
@@ -578,6 +598,20 @@ export function createAdvisoryAgentToolkit(
       });
     }
   };
+}
+
+function createRoleProviderResolver(
+  options: RoleAwareProviderOptions
+): (role: AgentRole | AdvisoryAgentRole) => LocalModelProvider {
+  if (options.providerForRole) {
+    return options.providerForRole;
+  }
+
+  if (options.provider) {
+    return () => options.provider!;
+  }
+
+  throw new Error("A model provider or providerForRole resolver is required.");
 }
 
 async function generateStructuredAgentOutput<TRole extends AgentRole, TOutput extends AgentOutputMap[TRole]>(

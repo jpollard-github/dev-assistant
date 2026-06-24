@@ -10,7 +10,7 @@ This file is the planning source of truth for the repository.
 
 ## Current Status
 
-Current phase: Phase 10 complete, with Phase 4 follow-up items still open.
+Current phase: Phase 11 complete, with Phase 4 follow-up items still open.
 
 What is implemented today:
 
@@ -30,12 +30,13 @@ What is implemented today:
 - Phase 8 now includes benchmark fixtures across six task categories, fixture materialization helpers, outcome scoring for the planned MVP quality gates, a multi-model eval matrix runner, regression-history persistence, and a golden structured-output suite for agent/advisory schemas.
 - Phase 9 now includes secret-aware repo access defaults, log redaction, network-disabled shell execution by default, hosted code-context opt-in requirements, provenance comments for generated code, panic mode for killing registered subprocesses, and a written threat model in `docs/security-threat-model.md`.
 - Phase 10 now includes a structured debt item schema, duplicate detection, auto-created debt candidates from reviewer and architecture findings, noisy-item confirmation, aging/severity sorting, and CLI commands to list, resolve, defer, and export debt items.
+- Phase 11 now includes repository privacy settings, role-specific local/hosted routing defaults and overrides, hosted cost estimation before runs, actual token-usage/cost reporting in CLI outputs, and mirrored routing support in the VS Code extension.
 
 What that means for MVP:
 
 - The project has crossed into an early MVP-capable state for small, low-risk tasks in both the CLI and VS Code.
 - The biggest remaining unlocks are better reviewer precision in live runs and real test-writing/edit application.
-- Security posture is now materially stronger for local-first use, but deeper isolation and secret-scanning follow-ups still remain for later phases.
+- Security posture is now materially stronger for local-first use, and Phase 11 adds privacy-aware hosted routing plus cost gates, but deeper isolation and secret-scanning follow-ups still remain for later phases.
 
 ## Implemented Decisions
 
@@ -66,7 +67,7 @@ What that means for MVP:
 - Remaining Phase 4 reviewer precision work now has baseline eval coverage, but still needs live prompt/model tuning plus stronger file-and-line citation consistency.
 - Remaining Phase 4 Test Writer implementation now has evaluation coverage, but still needs real test-authoring/apply workflow support instead of advisory output only.
 - Technical debt tracking now has structured schema, deduplication, and confirmation flows; the main remaining follow-up is optional external sync and further quality tuning.
-- The Post-Phase 4 dynamic role selection follow-up now has evaluation fixtures and regression traces to build on, with Phase 11 role-specific routing likely shaping the final design.
+- The Post-Phase 4 dynamic role selection follow-up now has evaluation fixtures, regression traces, and Phase 11 routing controls to build on.
 
 ## Product Thesis
 
@@ -362,6 +363,7 @@ This phase replaces the current no-op patch applier with a real, controlled patc
 ## Phase 13: Advanced Security Hardening
 
 - [ ] Add preflight secret scanning before any hosted code export.
+- [ ] Require an explicit per-run acknowledgement before private-repo code is routed to hosted providers, even when config allows it.
 - [ ] Add binary-file and large-file quarantine rules for agent context gathering.
 - [ ] Isolate test and format commands in disposable sandboxes or temp clones where possible.
 - [ ] Add per-file write scopes and branch isolation for assistant edits.
@@ -388,15 +390,15 @@ This phase replaces the current no-op patch applier with a real, controlled patc
 
 ## Phase 11: Hosted Model Option
 
-- [ ] Add hosted model providers behind an explicit opt-in.
-- [ ] Add per-provider cost estimation.
-- [ ] Add repository-level privacy settings.
-- [ ] Allow role-specific routing:
-  - [ ] local model for search, summaries, and debt tracking
-  - [ ] stronger hosted model for difficult coding tasks
-  - [ ] local or hosted reviewer depending on privacy needs
-- [ ] Show estimated cost before starting a task.
-- [ ] Log actual token usage when provider APIs return it.
+- [x] Add hosted model providers behind an explicit opt-in.
+- [x] Add per-provider cost estimation.
+- [x] Add repository-level privacy settings.
+- [x] Allow role-specific routing:
+  - [x] local model for search, summaries, and debt tracking
+  - [x] stronger hosted model for difficult coding tasks
+  - [x] local or hosted reviewer depending on privacy needs
+- [x] Show estimated cost before starting a task.
+- [x] Log actual token usage when provider APIs return it.
 
 ## Phase 12: Packaging And Distribution
 
@@ -486,14 +488,14 @@ Cost drivers:
 
 ## Recommended Cost Controls
 
-- [ ] Use cheaper local models for planning, summarization, and debt tracking.
-- [ ] Use stronger models only for coding and review.
+- [x] Use cheaper local models for planning, summarization, and debt tracking.
+- [x] Use stronger models only for coding and review.
 - [ ] Cache repository summaries.
 - [ ] Limit context to files proven relevant by search.
 - [x] Cap model calls per task.
 - [x] Cap patch size.
 - [ ] Run narrow tests before full suites.
-- [ ] Estimate cost before hosted calls.
+- [x] Estimate cost before hosted calls.
 - [ ] Store per-task cost and runtime metrics.
 - [x] Add a "local-only" mode that hard-blocks hosted providers.
 
@@ -511,7 +513,7 @@ Cost drivers:
 ## Risk Mitigations
 
 - [x] Keep humans in the loop for edits and risky commands.
-- [ ] Make reviewer agents adversarial and diff-focused.
+- [x] Make reviewer agents adversarial and diff-focused.
 - [x] Use structured outputs and validate them.
 - [x] Keep task scope small.
 - [x] Build evals early.
@@ -548,7 +550,7 @@ Add:
 - [x] Debt log.
 - [x] Evaluation fixtures.
 - [x] Structured debt lifecycle commands and deduplication.
-- [ ] Role-specific local model routing.
+- [x] Role-specific local model routing.
 
 ## Suggested Third Milestone
 

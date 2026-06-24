@@ -5,10 +5,12 @@ import { spawnSync } from "node:child_process";
 import {
   DEFAULT_CONFIG_FILE,
   ensureDataDir,
-  isSensitivePath,
+  estimateHostedCostForWorkflow,
   loadAssistantConfig,
+  resolveRoleRouteTarget,
   resolvePanicFilePath,
   resolveRepoPath,
+  routedAssistantRoles,
   type AssistantConfig
 } from "@dev-assistant/shared";
 
@@ -36,6 +38,8 @@ export function buildInitConfigTemplate(cwd: string): AssistantConfig {
     approvalPolicy: "on-risky-action",
     dataDir: ".dev-assistant",
     mode: "local-only",
+    repositoryPrivacy: "private",
+    routing: {},
     security: {
       allowNetwork: false,
       allowSecretAccess: false,
@@ -113,6 +117,19 @@ export function buildConfigDoctorReport(cwd: string) {
         (config.mode === "hybrid" || config.mode === "hosted") && !config.security.allowHostedCodeContext
           ? "Hosted mode is configured, but sending repository code to hosted models is not opted in."
           : "Hosted code-context policy is aligned with the current mode."
+    },
+    {
+      name: "repository-privacy",
+      status:
+        config.repositoryPrivacy === "private" &&
+        routedAssistantRoles.some((role) => resolveRoleRouteTarget(config, role) !== "local")
+          ? "warning"
+          : "ok",
+      message:
+        config.repositoryPrivacy === "private" &&
+        routedAssistantRoles.some((role) => resolveRoleRouteTarget(config, role) !== "local")
+          ? "Private repository mode is routing some roles to hosted providers. Confirm that off-machine code access is acceptable."
+          : `Repository privacy is set to ${config.repositoryPrivacy}.`
     },
     {
       name: "network-policy",
@@ -197,29 +214,28 @@ function resolveScriptCommand(
 }
 
 function buildProviderChecks(config: AssistantConfig): Array<{ name: string; status: "ok" | "warning" | "error"; message: string }> {
+  const checks: Array<{ name: string; status: "ok" | "warning" | "error"; message: string }> = [];
+
   if (config.model.provider === "ollama") {
     const result = spawnSync("ollama", ["--version"], { encoding: "utf8" });
     if (result.status === 0) {
-      return [
-        {
-          name: "ollama",
-          status: "ok",
-          message: result.stdout.trim() || result.stderr.trim() || "Ollama is installed."
-        }
-      ];
-    }
-
-    return [
-      {
+      checks.push({
+        name: "ollama",
+        status: "ok",
+        message: result.stdout.trim() || result.stderr.trim() || "Ollama is installed."
+      });
+    } else {
+      checks.push({
         name: "ollama",
         status: "warning",
         message: "Ollama was not detected on PATH."
-      }
-    ];
+      });
+    }
   }
 
   if ((config.mode === "hybrid" || config.mode === "hosted") && config.hosted) {
-    return [
+    const estimate = estimateHostedCostForWorkflow(config, "run");
+    checks.push(
       {
         name: "hosted-provider",
         status:
@@ -231,11 +247,26 @@ function buildProviderChecks(config: AssistantConfig): Array<{ name: string; sta
             ? `Hosted provider API key env var ${config.hosted.apiKeyEnvVar} is set.`
             : `Hosted provider API key is set, but network access is disabled.`
           : `Hosted provider API key env var ${config.hosted.apiKeyEnvVar} is not set.`
+      },
+      {
+        name: "hosted-routing",
+        status: estimate.lineItems.length > 0 ? "ok" : "warning",
+        message:
+          estimate.lineItems.length > 0
+            ? `Hosted routing is active for ${estimate.lineItems.map((item) => item.role).join(", ")}.`
+            : "Hosted mode is configured, but no current workflow roles are routed to hosted providers."
+      },
+      {
+        name: "hosted-pricing",
+        status: config.hosted.pricing ? "ok" : "warning",
+        message: config.hosted.pricing
+          ? `Hosted pricing is configured with an estimated run cost range of ${estimate.minimumCost.toFixed(4)}-${estimate.maximumCost.toFixed(4)} ${estimate.currency}.`
+          : "Hosted pricing is not configured, so CLI cost estimates will remain at zero."
       }
-    ];
+    );
   }
 
-  return [];
+  return checks;
 }
 
 function looksNetworkLike(command: string): boolean {

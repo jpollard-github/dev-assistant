@@ -15,15 +15,15 @@ import {
 } from "./index.js";
 import type { GitMcpServer, MemoryMcpServer, RepoMcpServer, TestMcpServer } from "@dev-assistant/mcp-servers";
 
-function createFakeProvider(): LocalModelProvider {
+function createFakeProvider(providerName = "fake-local"): LocalModelProvider {
   return {
-    provider: "fake-local",
+    provider: providerName,
     model: "fake-model",
     capabilities: resolveModelCapabilities("qwen2.5-coder:7b"),
     async generateText(_request: TextGenerationRequest): Promise<TextGenerationResult> {
       return {
         text: "hello",
-        provider: "fake-local",
+        provider: providerName,
         model: "fake-model",
         durationMs: 12
       };
@@ -119,7 +119,7 @@ function createFakeProvider(): LocalModelProvider {
       return {
         text: JSON.stringify(value),
         object: value,
-        provider: "fake-local",
+        provider: providerName,
         model: "fake-model",
         durationMs: 12,
         usage: {
@@ -263,6 +263,41 @@ describe("createCapabilityBackedAgentHandlers", () => {
     const envelope = coder as { metadata?: { promptSnapshot?: string } };
     expect(envelope.metadata?.promptSnapshot).toContain("Candidate files");
     expect(envelope.metadata?.promptSnapshot).toContain("Git status");
+  });
+
+  it("supports role-specific providers", async () => {
+    const seenRoles: string[] = [];
+    const hostedProvider = createFakeProvider("hosted-provider");
+    const localProvider = createFakeProvider("local-provider");
+
+    const handlers = createCapabilityBackedAgentHandlers({
+      providerForRole(role) {
+        seenRoles.push(role);
+        return role === "coder" ? hostedProvider : localProvider;
+      },
+      repoPath: "/repo",
+      ...createFakeServers()
+    });
+
+    const coordinator = (await handlers.coordinator({
+      taskId: "task-route-1",
+      title: "Route task",
+      prompt: "Inspect routing"
+    })) as { metadata?: { provider?: string } };
+    const coder = (await handlers.coder({
+      taskId: "task-route-1",
+      prompt: "Inspect routing",
+      plan: {
+        summary: "Plan",
+        steps: [{ id: "edit", description: "Edit file", kind: "edit" }],
+        requiresTests: true
+      }
+    })) as { metadata?: { provider?: string } };
+
+    expect(seenRoles).toContain("coordinator");
+    expect(seenRoles).toContain("coder");
+    expect(coordinator.metadata?.provider).toBe("local-provider");
+    expect(coder.metadata?.provider).toBe("hosted-provider");
   });
 });
 

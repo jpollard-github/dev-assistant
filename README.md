@@ -4,7 +4,7 @@ Dev Assistant is a local-first multi-agent development assistant. The goal is to
 
 ## Current Status
 
-This repository is in Phase 10: technical debt tracking. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted fallback support for hybrid mode, local repo/git/shell/test/memory capability servers, capability-backed advisory outputs for test writing, architecture review, and technical debt tracking, a real structured patch-application path with validation and final task reporting, a VS Code extension with task timeline and approvals, an eval package with benchmark fixtures/scoring/regression history, security controls for local-first use, and a structured debt system with dedupe, lifecycle commands, and reviewer/architecture-derived candidates.
+This repository is in Phase 11: hosted model options. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted routing with explicit opt-in, local repo/git/shell/test/memory capability servers, capability-backed advisory outputs for test writing, architecture review, and technical debt tracking, a real structured patch-application path with validation and final task reporting, a VS Code extension with task timeline and approvals, an eval package with benchmark fixtures/scoring/regression history, security controls for local-first use, a structured debt system with dedupe/lifecycle commands, and repository privacy plus hosted cost estimation/reporting controls.
 
 Roadmap, phase progress, milestones, MVP definition of done, and project decisions now live in [TODO.md](/Users/jasonp/repos/dev-assistant/TODO.md).
 
@@ -161,6 +161,8 @@ Create `dev-assistant.config.json` at the repository root when you want to overr
   "approvalPolicy": "on-risky-action",
   "dataDir": ".dev-assistant",
   "mode": "local-only",
+  "repositoryPrivacy": "private",
+  "routing": {},
   "security": {
     "allowNetwork": false,
     "allowSecretAccess": false,
@@ -173,7 +175,7 @@ Create `dev-assistant.config.json` at the repository root when you want to overr
 }
 ```
 
-Optional hybrid fallback example:
+Optional hybrid routing example:
 
 ```json
 {
@@ -183,25 +185,49 @@ Optional hybrid fallback example:
     "name": "qwen2.5-coder:7b"
   },
   "hosted": {
+    "providerName": "openai",
     "baseUrl": "https://api.openai.com/v1",
-    "apiKeyEnvVar": "OPENAI_API_KEY"
+    "apiKeyEnvVar": "OPENAI_API_KEY",
+    "model": "gpt-4.1-mini",
+    "pricing": {
+      "currency": "USD",
+      "inputCostPerMillionTokens": 0.4,
+      "outputCostPerMillionTokens": 1.6,
+      "maxTaskCost": 0.5
+    }
   },
   "allowedShellCommands": [],
   "formatCommands": [],
   "testCommands": [],
   "approvalPolicy": "never",
   "dataDir": ".dev-assistant",
-  "mode": "hybrid"
+  "mode": "hybrid",
+  "repositoryPrivacy": "internal",
+  "routing": {
+    "coder": "hosted",
+    "reviewer": "local"
+  },
+  "security": {
+    "allowNetwork": true,
+    "allowSecretAccess": false,
+    "allowHostedCodeContext": true,
+    "redactLogs": true,
+    "requireProvenanceComments": true,
+    "panicFile": ".dev-assistant/panic.json",
+    "processRegistryFile": ".dev-assistant/processes.json"
+  }
 }
 ```
 
-In `hybrid` mode, the assistant tries Ollama first and falls back to the hosted provider if the local model call fails. In `hosted` mode, set `"model.provider": "hosted"` and keep the `hosted` block populated.
+In `hybrid` mode, the default routing keeps planning, summaries, and debt-oriented roles local while allowing stronger hosted routing for coding and, on less-private repos, review. Set per-role overrides in `routing`, or use `"hybrid"` for a role when you want local-first with hosted fallback. In `hosted` mode, set `"model.provider": "hosted"` and keep the `hosted` block populated.
 
 Notes:
 
 - Any command listed in `formatCommands` or `testCommands` should also appear in `allowedShellCommands`, because the shell/test path still enforces the allowlist.
 - Commands like `history`, `debt list`, `debt add`, `debt resolve`, `debt defer`, `debt export`, `config doctor`, and `test` do not require Ollama to be running.
 - Commands like `run` and `review` still rely on the configured model provider.
+- `repositoryPrivacy` is a routing/safety hint for hosted review decisions and config-doctor warnings; it does not replace the explicit hosted opt-in controls.
+- Hosted cost estimates use the configured `hosted.pricing` rates and are shown before `run` and `review`, with actual returned token usage included in JSON/human summaries when providers report it.
 
 ## Development
 
@@ -214,7 +240,7 @@ corepack pnpm build
 
 ## Current Caveats
 
-- `dev-assistant run` now uses the configured Ollama model for structured agent outputs, and it can optionally fall back to a hosted Chat Completions compatible endpoint in `hybrid` mode.
+- `dev-assistant run` now supports role-aware local/hosted routing, shows hosted cost estimates before execution, and reports observed token usage/cost when providers return it.
 - Structured coder outputs now drive a real patch workflow with repo-bound validation, optional format commands, reviewer inspection of the final diff, and a final coordinator report.
 - Configured allowlisted test commands now run through the real shell/test path.
 - The CLI now supports `init`, `review`, `test`, `debt list`, `debt add`, `debt resolve`, `debt defer`, `debt export`, `history`, `config doctor`, `--dry-run`, interactive approvals, and `--json` output.
@@ -224,5 +250,5 @@ corepack pnpm build
 - Technical debt tracking is more structured now, but external sync and further ranking heuristics are still future work.
 - The eval package provides baseline scoring and regression tracking, but it still needs to be exercised regularly against real local model runs to tune prompt quality.
 - Shell execution is safer than before, but it still runs on the host OS rather than inside a disposable VM/container sandbox.
-- Hosted fallback support is implemented and unit-tested, but it was not live-validated here because no hosted credentials were configured in this repo.
+- Hosted routing and pricing controls are implemented and tested, but they were not live-validated here because no hosted credentials were configured in this repo.
 - A blocked task is currently reported in the JSON result, but the CLI still exits with code `0` unless a command-level exception is thrown.

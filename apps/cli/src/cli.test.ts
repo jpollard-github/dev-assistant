@@ -38,6 +38,8 @@ describe("CLI helpers", () => {
     expect(template.allowedShellCommands).toEqual(["corepack pnpm test", "corepack pnpm format"]);
     expect(template.security.allowNetwork).toBe(false);
     expect(template.security.allowHostedCodeContext).toBe(false);
+    expect(template.repositoryPrivacy).toBe("private");
+    expect(template.routing).toEqual({});
   });
 
   it("extracts changed files from unified diff text", () => {
@@ -109,6 +111,55 @@ describe("CLI helpers", () => {
     const report = buildConfigDoctorReport(cwd);
     expect(report.checks.some((check) => check.name === "hosted-code-context" && check.status === "warning")).toBe(true);
     expect(report.checks.some((check) => check.name === "network-policy" && check.status === "ok")).toBe(true);
+  });
+
+  it("warns when a private repository routes work to hosted providers", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "dev-assistant-cli-"));
+    writeFileSync(
+      join(cwd, "dev-assistant.config.json"),
+      JSON.stringify(
+        {
+          repoPath: ".",
+          model: { provider: "ollama", name: "qwen2.5-coder:7b" },
+          hosted: {
+            providerName: "openai",
+            baseUrl: "https://api.openai.com/v1",
+            apiKeyEnvVar: "OPENAI_API_KEY",
+            model: "gpt-4.1-mini",
+            pricing: {
+              currency: "USD",
+              inputCostPerMillionTokens: 1,
+              outputCostPerMillionTokens: 2
+            }
+          },
+          allowedShellCommands: [],
+          formatCommands: [],
+          testCommands: [],
+          approvalPolicy: "on-risky-action",
+          dataDir: ".dev-assistant",
+          mode: "hybrid",
+          repositoryPrivacy: "private",
+          routing: {
+            reviewer: "hosted"
+          },
+          security: {
+            allowNetwork: true,
+            allowSecretAccess: false,
+            allowHostedCodeContext: true,
+            redactLogs: true,
+            requireProvenanceComments: true,
+            panicFile: ".dev-assistant/panic.json",
+            processRegistryFile: ".dev-assistant/processes.json"
+          }
+        },
+        null,
+        2
+      )
+    );
+
+    const report = buildConfigDoctorReport(cwd);
+    expect(report.checks.some((check) => check.name === "repository-privacy" && check.status === "warning")).toBe(true);
+    expect(report.checks.some((check) => check.name === "hosted-pricing" && check.status === "ok")).toBe(true);
   });
 
   it("includes the structured debt security defaults in generated init config", () => {

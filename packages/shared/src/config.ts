@@ -2,6 +2,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
 
+import {
+  hostedPricingSchema,
+  repositoryPrivacySchema,
+  roleRoutingSchema
+} from "./model-routing.js";
 import { securityConfigSchema } from "./security.js";
 
 export const approvalPolicySchema = z.enum(["always", "on-risky-action", "never"]);
@@ -20,8 +25,11 @@ export const assistantConfigSchema = z.object({
     .default({ provider: "ollama", name: "qwen2.5-coder:7b" }),
   hosted: z
     .object({
+      providerName: z.string().min(1).default("hosted"),
       baseUrl: z.string().min(1),
-      apiKeyEnvVar: z.string().min(1).default("OPENAI_API_KEY")
+      apiKeyEnvVar: z.string().min(1).default("OPENAI_API_KEY"),
+      model: z.string().min(1).optional(),
+      pricing: hostedPricingSchema.optional()
     })
     .optional(),
   allowedShellCommands: z.array(z.string().min(1)).default([]),
@@ -30,6 +38,8 @@ export const assistantConfigSchema = z.object({
   approvalPolicy: approvalPolicySchema.default("on-risky-action"),
   dataDir: z.string().min(1).default(".dev-assistant"),
   mode: assistantModeSchema.default("local-only"),
+  repositoryPrivacy: repositoryPrivacySchema.default("private"),
+  routing: roleRoutingSchema,
   security: securityConfigSchema
 });
 

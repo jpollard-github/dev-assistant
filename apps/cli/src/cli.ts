@@ -5,13 +5,20 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 
 import { parseAgentOutput, type AgentOutputMap, type CoderOutput } from "@dev-assistant/agents";
-import { TaskCoordinator, SqliteTaskEventStore, type AgentExecutionEnvelope } from "@dev-assistant/core";
+import {
+  TaskCoordinator,
+  SqliteTaskEventStore,
+  type AgentExecutionEnvelope,
+  type ModelTokenUsage,
+  type TaskEvent
+} from "@dev-assistant/core";
 import {
   createAdvisoryAgentToolkit,
   createCapabilityBackedAgentHandlers,
   createFallbackProvider,
   createHostedModelProvider,
-  createOllamaProvider
+  createOllamaProvider,
+  type LocalModelProvider
 } from "@dev-assistant/llm";
 import {
   clearPanicMode,
@@ -29,10 +36,17 @@ import {
 import {
   DEFAULT_CONFIG_FILE,
   ensureDataDir,
+  estimateHostedCostForWorkflow,
+  estimateHostedUsageCost,
   loadAssistantConfig,
+  resolveHostedModelName,
+  resolveHostedProviderName,
   resolvePanicFilePath,
   resolveProcessRegistryPath,
   resolveRepoPath,
+  resolveRoleRouteTarget,
+  type HostedCostEstimate,
+  type RoutedAssistantRole,
   createLogger,
   type AssistantConfig
 } from "@dev-assistant/shared";
@@ -61,6 +75,15 @@ interface ModelCommandContext extends BaseCommandContext {
   readonly advisoryToolkit: ReturnType<typeof createAdvisoryAgentToolkit>;
 }
 
+interface ModelUsageRecord {
+  readonly role: RoutedAssistantRole;
+  readonly provider: string;
+  readonly model: string;
+  readonly durationMs: number;
+  readonly tokenUsage?: ModelTokenUsage;
+  readonly finishReason?: string;
+}
+
 interface CommandFlags {
   readonly json: boolean;
 }
@@ -74,6 +97,8 @@ interface ReviewResult {
   readonly taskId: string;
   readonly diffFiles: readonly string[];
   readonly review: AgentOutputMap["reviewer"];
+  readonly costEstimate: HostedCostEstimate;
+  readonly modelUsage: ReturnType<typeof summarizeModelUsage>;
 }
 
 interface TestResultSummary {
@@ -216,7 +241,22 @@ async function handleRun(args: string[]): Promise<void> {
   }
 
   const context = createModelCommandContext(flags.json);
+  const costEstimate = estimateHostedCostForWorkflow(context.config, "run");
+  assertEstimatedCostAllowed(context.config, costEstimate);
+  if (!flags.json) {
+    logger.info("Hosted cost estimate", {
+      workflow: "run",
+      range: formatCostEstimateRange(costEstimate),
+      hostedRoles: costEstimate.lineItems.map((item) => ({
+        role: item.role,
+        route: item.route,
+        model: item.model
+      }))
+    });
+  }
+
   try {
+    const modelUsageRecords: ModelUsageRecord[] = [];
     const coordinator = new TaskCoordinator({
       store: context.store,
       agents: context.agents,
@@ -240,6 +280,13 @@ async function handleRun(args: string[]): Promise<void> {
       });
     }
 
+    coordinator.eventBus.subscribe((event) => {
+      const record = extractModelUsageRecord(event);
+      if (record) {
+        modelUsageRecords.push(record);
+      }
+    });
+
     const result = await coordinator.runTask({
       prompt,
       config: {
@@ -251,9 +298,15 @@ async function handleRun(args: string[]): Promise<void> {
     });
 
     const advisory = await buildAdvisorySummary(context, result, prompt, flags.dryRun, flags);
+    if (advisory) {
+      modelUsageRecords.push(...advisory.modelUsage);
+    }
+    const modelUsage = summarizeModelUsage(context.config, modelUsageRecords);
     const payload = {
       task: result.task,
       usage: result.usage,
+      costEstimate,
+      modelUsage,
       approvals: result.approvals,
       outputRoles: Object.keys(result.outputs),
       dryRun: flags.dryRun,
@@ -265,7 +318,13 @@ async function handleRun(args: string[]): Promise<void> {
         testCommandResults: result.outputs["test-runner"]?.commandResults ?? [],
         finalReport: result.outputs["coordinator-report"] ?? null
       },
-      advisory
+      advisory: advisory
+        ? {
+            testWriter: advisory.testWriter,
+            architectureReview: advisory.architectureReview,
+            technicalDebt: advisory.technicalDebt
+          }
+        : null
     };
 
     emit(flags, payload, formatRunSummary(payload));
@@ -277,9 +336,23 @@ async function handleRun(args: string[]): Promise<void> {
 async function handleReview(args: string[]): Promise<void> {
   const { flags } = parseCommonFlags(args);
   const context = createModelCommandContext(flags.json);
+  const costEstimate = estimateHostedCostForWorkflow(context.config, "review");
+  assertEstimatedCostAllowed(context.config, costEstimate);
+
+  if (!flags.json) {
+    logger.info("Hosted cost estimate", {
+      workflow: "review",
+      range: formatCostEstimateRange(costEstimate),
+      hostedRoles: costEstimate.lineItems.map((item) => ({
+        role: item.role,
+        route: item.route,
+        model: item.model
+      }))
+    });
+  }
 
   try {
-    const result = await runReview(context);
+    const result = await runReview(context, costEstimate);
     emit(
       flags,
       result,
@@ -564,13 +637,13 @@ function createBaseCommandContext(
 
 function createModelCommandContext(jsonMode: boolean): ModelCommandContext {
   const base = createBaseCommandContext(jsonMode);
-  const provider = resolveModelProvider(base.config);
+  const providerForRole = createProviderResolver(base.config);
   const repoServer = createRepoMcpServer(base.repoPath, {
     allowSecretAccess: base.config.security.allowSecretAccess
   });
   const gitServer = createGitMcpServer(base.repoPath);
   const agents = createCapabilityBackedAgentHandlers({
-    provider,
+    providerForRole,
     repoPath: base.repoPath,
     repoServer,
     gitServer,
@@ -590,7 +663,7 @@ function createModelCommandContext(jsonMode: boolean): ModelCommandContext {
     }
   });
   const advisoryToolkit = createAdvisoryAgentToolkit({
-    provider,
+    providerForRole,
     repoPath: base.repoPath,
     repoServer,
     gitServer,
@@ -610,7 +683,10 @@ function createModelCommandContext(jsonMode: boolean): ModelCommandContext {
   };
 }
 
-async function runReview(context: ModelCommandContext): Promise<ReviewResult> {
+async function runReview(
+  context: ModelCommandContext,
+  costEstimate: HostedCostEstimate
+): Promise<ReviewResult> {
   const taskId = randomUUID();
   const diff = await createGitMcpServer(context.repoPath).diff();
   const diffFiles = parseDiffFiles(diff);
@@ -619,11 +695,13 @@ async function runReview(context: ModelCommandContext): Promise<ReviewResult> {
     return {
       taskId,
       diffFiles: [],
+      costEstimate,
       review: {
         summary: "No current diff to review.",
         approved: true,
         findings: []
-      }
+      },
+      modelUsage: summarizeModelUsage(context.config, [])
     };
   }
 
@@ -656,11 +734,16 @@ async function runReview(context: ModelCommandContext): Promise<ReviewResult> {
       formattingCommands: []
     }
   });
+  const modelUsageRecords = [extractUsageRecordFromEnvelope("reviewer", raw as AgentExecutionEnvelope)].filter(
+    (record): record is ModelUsageRecord => record !== null
+  );
 
   return {
     taskId,
     diffFiles,
-    review: normalizeAgentOutput("reviewer", raw)
+    review: normalizeAgentOutput("reviewer", raw),
+    costEstimate,
+    modelUsage: summarizeModelUsage(context.config, modelUsageRecords)
   };
 }
 
@@ -679,6 +762,7 @@ async function buildAdvisorySummary(
     | Awaited<ReturnType<typeof context.advisoryToolkit.architectureReview>>["output"]
     | null;
   readonly technicalDebt: Awaited<ReturnType<typeof context.advisoryToolkit.technicalDebt>>["output"] | null;
+  readonly modelUsage: readonly ModelUsageRecord[];
 } | null> {
   if (!result.outputs.coordinator || !result.outputs.coder || !result.outputs.reviewer) {
     return null;
@@ -747,7 +831,12 @@ async function buildAdvisorySummary(
   return {
     testWriter: testWriter?.output ?? null,
     architectureReview: architectureReview.output,
-    technicalDebt: technicalDebt.output
+    technicalDebt: technicalDebt.output,
+    modelUsage: [
+      extractUsageRecordFromEnvelope("architecture-review", architectureReview),
+      extractUsageRecordFromEnvelope("technical-debt", technicalDebt),
+      testWriter ? extractUsageRecordFromEnvelope("test-writer", testWriter) : null
+    ].filter((record): record is ModelUsageRecord => record !== null)
   };
 }
 
@@ -819,47 +908,80 @@ async function resolveApproval(
 }
 
 
-function resolveModelProvider(config: AssistantConfig) {
-  if (config.model.provider === "ollama") {
-    const ollamaProvider = createOllamaProvider({
-      model: config.model.name
-    });
+function createProviderResolver(
+  config: AssistantConfig
+): (role: RoutedAssistantRole) => LocalModelProvider {
+  const localProvider = createLocalProvider(config);
+  const cache = new Map<string, LocalModelProvider>([["local", localProvider]]);
 
-    if (config.mode === "hybrid" && config.hosted) {
-      assertHostedCodeContextAllowed(config);
-      return createFallbackProvider(
-        ollamaProvider,
-        createHostedModelProvider({
-          model: config.model.name,
-          baseUrl: config.hosted.baseUrl,
-          apiKey: requireHostedApiKey(config.hosted.apiKeyEnvVar),
-          providerName: "hosted-fallback"
-        })
-      );
+  return (role) => {
+    const route = resolveRoleRouteTarget(config, role);
+    if (route === "local") {
+      return localProvider;
     }
 
-    return ollamaProvider;
-  }
-
-  if (config.model.provider === "hosted") {
-    assertHostedCodeContextAllowed(config);
-    if (!config.hosted) {
+    if (config.mode === "local-only") {
       throw new Error(
-        'Hosted provider requires a "hosted" config block with "baseUrl" and "apiKeyEnvVar".'
+        `Role "${role}" is routed to ${route}, but local-only mode blocks hosted providers.`
       );
     }
 
-    return createHostedModelProvider({
-      model: config.model.name,
-      baseUrl: config.hosted.baseUrl,
-      apiKey: requireHostedApiKey(config.hosted.apiKeyEnvVar),
-      providerName: "hosted"
-    });
+    assertHostedCodeContextAllowed(config);
+
+    if (route === "hosted") {
+      const cached = cache.get("hosted");
+      if (cached) {
+        return cached;
+      }
+
+      const hostedProvider = createHostedProvider(config, resolveHostedProviderName(config));
+      cache.set("hosted", hostedProvider);
+      return hostedProvider;
+    }
+
+    const cached = cache.get("hybrid");
+    if (cached) {
+      return cached;
+    }
+
+    const hostedFallback = createHostedProvider(
+      config,
+      `${resolveHostedProviderName(config)}-fallback`
+    );
+    const hybridProvider = createFallbackProvider(localProvider, hostedFallback);
+    cache.set("hybrid", hybridProvider);
+    return hybridProvider;
+  };
+}
+
+function createLocalProvider(config: AssistantConfig): LocalModelProvider {
+  if (config.model.provider !== "ollama" && config.model.provider !== "hosted") {
+    throw new Error(
+      `Model provider "${config.model.provider}" is not implemented yet. Phase 11 currently supports ollama-backed local routing and hosted routing.`
+    );
   }
 
-  throw new Error(
-    `Model provider "${config.model.provider}" is not implemented yet. Phase 2 currently supports ollama and hosted fallback.`
-  );
+  return createOllamaProvider({
+    model: config.model.name
+  });
+}
+
+function createHostedProvider(
+  config: AssistantConfig,
+  providerName: string
+): LocalModelProvider {
+  if (!config.hosted) {
+    throw new Error(
+      'Hosted provider requires a "hosted" config block with "baseUrl" and "apiKeyEnvVar".'
+    );
+  }
+
+  return createHostedModelProvider({
+    model: resolveHostedModelName(config),
+    baseUrl: config.hosted.baseUrl,
+    apiKey: requireHostedApiKey(config.hosted.apiKeyEnvVar),
+    providerName
+  });
 }
 
 function assertAssistantActionAllowed(config: AssistantConfig): void {
@@ -887,6 +1009,134 @@ function requireHostedApiKey(envVarName: string): string {
   }
 
   return apiKey;
+}
+
+function assertEstimatedCostAllowed(config: AssistantConfig, estimate: HostedCostEstimate): void {
+  const maxTaskCost = config.hosted?.pricing?.maxTaskCost;
+  if (maxTaskCost !== undefined && estimate.maximumCost > maxTaskCost) {
+    throw new Error(
+      `Estimated hosted cost ${formatCurrency(estimate.maximumCost, estimate.currency)} exceeds hosted.pricing.maxTaskCost (${formatCurrency(maxTaskCost, estimate.currency)}).`
+    );
+  }
+}
+
+function extractModelUsageRecord(event: TaskEvent): ModelUsageRecord | null {
+  if (event.type !== "tool.result" || event.payload.tool !== "llm-provider") {
+    return null;
+  }
+
+  const result = event.payload.result as {
+    readonly role: RoutedAssistantRole;
+    readonly provider: string;
+    readonly model: string;
+    readonly durationMs: number;
+    readonly tokenUsage?: ModelTokenUsage;
+    readonly finishReason?: string;
+  };
+
+  return withOptionalProperties(
+    {
+      role: result.role,
+      provider: result.provider,
+      model: result.model,
+      durationMs: result.durationMs
+    },
+    {
+      tokenUsage: result.tokenUsage,
+      finishReason: result.finishReason
+    }
+  );
+}
+
+function extractUsageRecordFromEnvelope(
+  role: RoutedAssistantRole,
+  value: AgentExecutionEnvelope | { output: unknown; metadata?: AgentExecutionEnvelope["metadata"] }
+): ModelUsageRecord | null {
+  if (!("metadata" in value) || !value.metadata?.provider || !value.metadata.model) {
+    return null;
+  }
+
+  return withOptionalProperties(
+    {
+      role,
+      provider: value.metadata.provider,
+      model: value.metadata.model,
+      durationMs: value.metadata.durationMs ?? 0
+    },
+    {
+      tokenUsage: value.metadata.tokenUsage,
+      finishReason: value.metadata.finishReason
+    }
+  );
+}
+
+function withOptionalProperties<TBase extends object, TOptional extends Record<string, unknown>>(
+  base: TBase,
+  optional: TOptional
+): TBase & Partial<TOptional> {
+  return Object.fromEntries(
+    [...Object.entries(base), ...Object.entries(optional).filter(([, value]) => value !== undefined)]
+  ) as TBase & Partial<TOptional>;
+}
+
+function summarizeModelUsage(config: AssistantConfig, records: readonly ModelUsageRecord[]) {
+  const totals = {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    durationMs: 0,
+    hostedCost: 0
+  };
+
+  const normalizedRecords = records.map((record) => {
+    totals.durationMs += record.durationMs;
+    totals.inputTokens += record.tokenUsage?.inputTokens ?? 0;
+    totals.outputTokens += record.tokenUsage?.outputTokens ?? 0;
+    totals.totalTokens +=
+      record.tokenUsage?.totalTokens ??
+      (record.tokenUsage?.inputTokens ?? 0) + (record.tokenUsage?.outputTokens ?? 0);
+
+    const route = resolveRoleRouteTarget(config, record.role);
+    const billedHosted =
+      route !== "local" && record.provider !== "ollama" && record.provider !== "deterministic";
+    const estimatedCost = billedHosted
+      ? estimateHostedUsageCost(config.hosted?.pricing, record.tokenUsage)
+      : 0;
+    totals.hostedCost += estimatedCost;
+
+    return {
+      ...record,
+      route,
+      estimatedHostedCost: estimatedCost
+    };
+  });
+
+  return {
+    totalCalls: normalizedRecords.length,
+    hostedCalls: normalizedRecords.filter((record) => record.estimatedHostedCost > 0).length,
+    totals,
+    records: normalizedRecords
+  };
+}
+
+function formatCostEstimateRange(estimate: HostedCostEstimate): string {
+  if (estimate.maximumCost === 0) {
+    return formatCurrency(0, estimate.currency);
+  }
+
+  if (estimate.minimumCost === estimate.maximumCost) {
+    return formatCurrency(estimate.maximumCost, estimate.currency);
+  }
+
+  return `${formatCurrency(estimate.minimumCost, estimate.currency)}-${formatCurrency(estimate.maximumCost, estimate.currency)}`;
+}
+
+function formatCurrency(value: number, currency: string): string {
+  if (currency.toUpperCase() === "USD") {
+    return `$${value.toFixed(4)}`;
+  }
+
+  return `${value.toFixed(4)} ${currency}`;
 }
 
 function formatDebtList(
@@ -1077,6 +1327,8 @@ function emit(flags: CommandFlags, payload: unknown, human: string): void {
 function formatRunSummary(payload: {
   readonly task: { id: string; status: string };
   readonly dryRun: boolean;
+  readonly costEstimate: HostedCostEstimate;
+  readonly modelUsage: ReturnType<typeof summarizeModelUsage>;
   readonly summary: {
     readonly changedFiles: readonly string[];
     readonly reviewerApproved: boolean | null;
@@ -1091,6 +1343,8 @@ function formatRunSummary(payload: {
 
   return [
     `Task ${payload.task.id} finished with status: ${payload.task.status}${payload.dryRun ? " (dry run)" : ""}`,
+    `Hosted cost estimate: ${formatCostEstimateRange(payload.costEstimate)}`,
+    `Hosted cost observed: ${formatCurrency(payload.modelUsage.totals.hostedCost, payload.costEstimate.currency)}`,
     `Reviewer approved: ${payload.summary.reviewerApproved === null ? "n/a" : payload.summary.reviewerApproved ? "yes" : "no"}`,
     `Tests passed: ${payload.summary.testPassed === null ? "not run" : payload.summary.testPassed ? "yes" : "no"}`,
     "Changed files:",
@@ -1112,6 +1366,8 @@ function formatReviewSummary(result: ReviewResult): string {
   return [
     `Review task ${result.taskId}`,
     `Files reviewed: ${result.diffFiles.length > 0 ? result.diffFiles.join(", ") : "none"}`,
+    `Hosted cost estimate: ${formatCostEstimateRange(result.costEstimate)}`,
+    `Hosted cost observed: ${formatCurrency(result.modelUsage.totals.hostedCost, result.costEstimate.currency)}`,
     `Approved: ${result.review.approved ? "yes" : "no"}`,
     `Summary: ${result.review.summary}`,
     "Findings:",

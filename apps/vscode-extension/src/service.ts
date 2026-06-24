@@ -10,7 +10,8 @@ import {
   createCapabilityBackedAgentHandlers,
   createFallbackProvider,
   createHostedModelProvider,
-  createOllamaProvider
+  createOllamaProvider,
+  type LocalModelProvider
 } from "@dev-assistant/llm";
 import {
   isPanicModeEnabled,
@@ -25,9 +26,13 @@ import {
 import {
   ensureDataDir,
   loadAssistantConfig,
+  resolveHostedModelName,
+  resolveHostedProviderName,
   resolvePanicFilePath,
   resolveProcessRegistryPath,
   resolveRepoPath,
+  resolveRoleRouteTarget,
+  type RoutedAssistantRole,
   type AssistantConfig
 } from "@dev-assistant/shared";
 
@@ -332,9 +337,9 @@ export class LocalWorkspaceService {
 
   private createModelContext() {
     const base = this.createBaseContext();
-    const provider = resolveModelProvider(base.config);
+    const providerForRole = createProviderResolver(base.config);
     const agents = createCapabilityBackedAgentHandlers({
-      provider,
+      providerForRole,
       repoPath: base.repoPath,
       repoServer: base.repoServer,
       gitServer: base.gitServer,
@@ -354,7 +359,7 @@ export class LocalWorkspaceService {
       }
     });
     const advisoryToolkit = createAdvisoryAgentToolkit({
-      provider,
+      providerForRole,
       repoPath: base.repoPath,
       repoServer: base.repoServer,
       gitServer: base.gitServer,
@@ -375,42 +380,76 @@ export class LocalWorkspaceService {
   }
 }
 
-function resolveModelProvider(config: AssistantConfig) {
-  if (config.model.provider === "ollama") {
-    const ollamaProvider = createOllamaProvider({
-      model: config.model.name
-    });
+function createProviderResolver(
+  config: AssistantConfig
+): (role: RoutedAssistantRole) => LocalModelProvider {
+  const localProvider = createLocalProvider(config);
+  const cache = new Map<string, LocalModelProvider>([["local", localProvider]]);
 
-    if (config.mode === "hybrid" && config.hosted) {
-      assertHostedCodeContextAllowed(config);
-      return createFallbackProvider(
-        ollamaProvider,
-        createHostedModelProvider({
-          model: config.model.name,
-          baseUrl: config.hosted.baseUrl,
-          apiKey: requireHostedApiKey(config.hosted.apiKeyEnvVar),
-          providerName: "hosted-fallback"
-        })
+  return (role) => {
+    const route = resolveRoleRouteTarget(config, role);
+    if (route === "local") {
+      return localProvider;
+    }
+
+    if (config.mode === "local-only") {
+      throw new Error(
+        `Role "${role}" is routed to ${route}, but local-only mode blocks hosted providers.`
       );
     }
 
-    return ollamaProvider;
-  }
-
-  if (config.model.provider === "hosted") {
     assertHostedCodeContextAllowed(config);
-    if (!config.hosted) {
-      throw new Error("Hosted model provider selected but hosted config is missing.");
+
+    if (route === "hosted") {
+      const cached = cache.get("hosted");
+      if (cached) {
+        return cached;
+      }
+
+      const hostedProvider = createHostedProvider(config, resolveHostedProviderName(config));
+      cache.set("hosted", hostedProvider);
+      return hostedProvider;
     }
 
-    return createHostedModelProvider({
-      model: config.model.name,
-      baseUrl: config.hosted.baseUrl,
-      apiKey: requireHostedApiKey(config.hosted.apiKeyEnvVar)
-    });
+    const cached = cache.get("hybrid");
+    if (cached) {
+      return cached;
+    }
+
+    const hostedFallback = createHostedProvider(
+      config,
+      `${resolveHostedProviderName(config)}-fallback`
+    );
+    const hybridProvider = createFallbackProvider(localProvider, hostedFallback);
+    cache.set("hybrid", hybridProvider);
+    return hybridProvider;
+  };
+}
+
+function createLocalProvider(config: AssistantConfig): LocalModelProvider {
+  if (config.model.provider !== "ollama" && config.model.provider !== "hosted") {
+    throw new Error(`Model provider "${config.model.provider}" is not yet implemented in the extension.`);
   }
 
-  throw new Error(`Model provider "${config.model.provider}" is not yet implemented in the extension.`);
+  return createOllamaProvider({
+    model: config.model.name
+  });
+}
+
+function createHostedProvider(
+  config: AssistantConfig,
+  providerName: string
+): LocalModelProvider {
+  if (!config.hosted) {
+    throw new Error("Hosted model provider selected but hosted config is missing.");
+  }
+
+  return createHostedModelProvider({
+    model: resolveHostedModelName(config),
+    baseUrl: config.hosted.baseUrl,
+    apiKey: requireHostedApiKey(config.hosted.apiKeyEnvVar),
+    providerName
+  });
 }
 
 function assertHostedCodeContextAllowed(config: AssistantConfig): void {
