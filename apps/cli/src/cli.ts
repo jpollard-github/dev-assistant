@@ -39,6 +39,7 @@ import {
   estimateHostedCostForWorkflow,
   estimateHostedUsageCost,
   loadAssistantConfig,
+  writeLocalCrashReport,
   resolveHostedModelName,
   resolveHostedProviderName,
   resolvePanicFilePath,
@@ -53,6 +54,7 @@ import {
 import {
   buildConfigDoctorReport,
   buildInitConfigTemplate,
+  buildRuntimeDoctorReport,
   detectPackageManager,
   parseDiffFiles
 } from "./utils.js";
@@ -120,6 +122,9 @@ export async function main(argv: readonly string[]): Promise<void> {
     case "config":
       await handleConfig(args.slice(1));
       return;
+    case "doctor":
+      await handleDoctor(args.slice(1));
+      return;
     case "init":
       await handleInit(args.slice(1));
       return;
@@ -157,6 +162,7 @@ function printHelp(): void {
 Commands:
   dev-assistant init [--force] [--json]
   dev-assistant version
+  dev-assistant doctor [--json]
   dev-assistant config [--json]
   dev-assistant config doctor [--json]
   dev-assistant run "task description" [--approve] [--dry-run] [--json]
@@ -206,6 +212,12 @@ async function handleConfig(args: string[]): Promise<void> {
   }
 
   emit(flags, config, JSON.stringify(config, null, 2));
+}
+
+async function handleDoctor(args: string[]): Promise<void> {
+  const { flags } = parseCommonFlags(args);
+  const report = buildRuntimeDoctorReport(process.cwd());
+  emit(flags, report, formatDoctorReport(report));
 }
 
 async function handleInit(args: string[]): Promise<void> {

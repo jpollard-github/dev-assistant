@@ -9,6 +9,17 @@ import {
 } from "./model-routing.js";
 import { securityConfigSchema } from "./security.js";
 
+export const crashReportingConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    directory: z.string().min(1).default(".dev-assistant/crash-reports"),
+    endpoint: z.string().url().optional()
+  })
+  .default({
+    enabled: false,
+    directory: ".dev-assistant/crash-reports"
+  });
+
 export const approvalPolicySchema = z.enum(["always", "on-risky-action", "never"]);
 export type ApprovalPolicy = z.infer<typeof approvalPolicySchema>;
 
@@ -40,6 +51,7 @@ export const assistantConfigSchema = z.object({
   mode: assistantModeSchema.default("local-only"),
   repositoryPrivacy: repositoryPrivacySchema.default("private"),
   routing: roleRoutingSchema,
+  crashReporting: crashReportingConfigSchema,
   security: securityConfigSchema
 });
 

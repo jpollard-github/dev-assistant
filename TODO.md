@@ -10,7 +10,7 @@ This file is the planning source of truth for the repository.
 
 ## Current Status
 
-Current phase: Phase 11 complete, with Phase 4 follow-up items still open.
+Current phase: Phase 12 complete, with Phase 4 follow-up items still open.
 
 What is implemented today:
 
@@ -31,12 +31,13 @@ What is implemented today:
 - Phase 9 now includes secret-aware repo access defaults, log redaction, network-disabled shell execution by default, hosted code-context opt-in requirements, provenance comments for generated code, panic mode for killing registered subprocesses, and a written threat model in `docs/security-threat-model.md`.
 - Phase 10 now includes a structured debt item schema, duplicate detection, auto-created debt candidates from reviewer and architecture findings, noisy-item confirmation, aging/severity sorting, and CLI commands to list, resolve, defer, and export debt items.
 - Phase 11 now includes repository privacy settings, role-specific local/hosted routing defaults and overrides, hosted cost estimation before runs, actual token-usage/cost reporting in CLI outputs, and mirrored routing support in the VS Code extension.
+- Phase 12 now includes distributable CLI and VS Code packaging metadata/scripts, install and workflow docs, a first-run `doctor` command, SQLite schema migration support, and opt-in local crash reporting.
 
 What that means for MVP:
 
 - The project has crossed into an early MVP-capable state for small, low-risk tasks in both the CLI and VS Code.
 - The biggest remaining unlocks are better reviewer precision in live runs and real test-writing/edit application.
-- Security posture is now materially stronger for local-first use, and Phase 11 adds privacy-aware hosted routing plus cost gates, but deeper isolation and secret-scanning follow-ups still remain for later phases.
+- Security posture is now materially stronger for local-first use, and Phase 12 adds safer distribution/diagnostics defaults plus opt-in crash capture, but deeper isolation and secret-scanning follow-ups still remain for later phases.
 
 ## Implemented Decisions
 
@@ -364,6 +365,7 @@ This phase replaces the current no-op patch applier with a real, controlled patc
 
 - [ ] Add preflight secret scanning before any hosted code export.
 - [ ] Require an explicit per-run acknowledgement before private-repo code is routed to hosted providers, even when config allows it.
+- [ ] Add retention limits and explicit upload controls for crash reports before any remote crash endpoint is supported.
 - [ ] Add binary-file and large-file quarantine rules for agent context gathering.
 - [ ] Isolate test and format commands in disposable sandboxes or temp clones where possible.
 - [ ] Add per-file write scopes and branch isolation for assistant edits.
@@ -402,13 +404,13 @@ This phase replaces the current no-op patch applier with a real, controlled patc
 
 ## Phase 12: Packaging And Distribution
 
-- [ ] Package the CLI.
-- [ ] Package the VS Code extension.
-- [ ] Add install docs for local model runtimes.
-- [ ] Add first-run diagnostics.
-- [ ] Add example workflows.
-- [ ] Add upgrade and migration logic for local SQLite state.
-- [ ] Add crash reporting only as opt-in.
+- [x] Package the CLI.
+- [x] Package the VS Code extension.
+- [x] Add install docs for local model runtimes.
+- [x] Add first-run diagnostics.
+- [x] Add example workflows.
+- [x] Add upgrade and migration logic for local SQLite state.
+- [x] Add crash reporting only as opt-in.
 
 ## Estimated Build Effort
 
@@ -581,6 +583,17 @@ Add:
 - [x] Reviewer and architecture debt candidates.
 - [x] Noisy-item confirmation flow.
 - [x] Resolve, defer, and export debt commands.
+
+## Suggested Sixth Milestone
+
+Add:
+
+- [x] First-run `doctor` diagnostics.
+- [x] SQLite schema migration support for task history.
+- [x] CLI tarball packaging metadata.
+- [x] VS Code VSIX packaging metadata.
+- [x] Local runtime setup and example workflow docs.
+- [x] Crash reporting that stays opt-in.
 
 ## Definition Of Done For MVP
 

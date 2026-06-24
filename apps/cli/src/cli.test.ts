@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildConfigDoctorReport,
   buildInitConfigTemplate,
+  buildRuntimeDoctorReport,
   detectPackageManager,
   parseDiffFiles
 } from "./utils.js";
@@ -40,6 +41,7 @@ describe("CLI helpers", () => {
     expect(template.security.allowHostedCodeContext).toBe(false);
     expect(template.repositoryPrivacy).toBe("private");
     expect(template.routing).toEqual({});
+    expect(template.crashReporting.enabled).toBe(false);
   });
 
   it("extracts changed files from unified diff text", () => {
@@ -170,5 +172,15 @@ describe("CLI helpers", () => {
     expect(template.security.requireProvenanceComments).toBe(true);
     expect(template.security.allowSecretAccess).toBe(false);
     expect(template.security.panicFile).toContain(".dev-assistant");
+    expect(template.crashReporting.directory).toContain(".dev-assistant/crash-reports");
+  });
+
+  it("includes task-store and crash-report checks in runtime doctor output", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "dev-assistant-cli-"));
+    writeFileSync(join(cwd, "package.json"), JSON.stringify({ name: "fixture" }, null, 2));
+
+    const report = buildRuntimeDoctorReport(cwd);
+    expect(report.checks.some((check) => check.name === "task-store" && check.status === "ok")).toBe(true);
+    expect(report.checks.some((check) => check.name === "crash-reports" && check.status === "ok")).toBe(true);
   });
 });

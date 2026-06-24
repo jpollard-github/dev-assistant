@@ -1,17 +1,30 @@
 {
   "name": "@dev-assistant/cli",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "description": "CLI for the local-first Dev Assistant multi-agent workflow.",
+  "license": "UNLICENSED",
   "type": "module",
   "bin": {
     "dev-assistant": "./dist/index.js"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "dev": "node dist/index.js",
+    "package:tarball": "pnpm pack --pack-destination ../../dist",
     "test": "vitest run --passWithNoTests"
   },
+  "keywords": [
+    "ai",
+    "agents",
+    "cli",
+    "development"
+  ],
   "dependencies": {
     "@dev-assistant/agents": "workspace:*",
     "@dev-assistant/core": "workspace:*",

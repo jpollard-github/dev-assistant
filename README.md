@@ -4,9 +4,14 @@ Dev Assistant is a local-first multi-agent development assistant. The goal is to
 
 ## Current Status
 
-This repository is in Phase 11: hosted model options. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted routing with explicit opt-in, local repo/git/shell/test/memory capability servers, capability-backed advisory outputs for test writing, architecture review, and technical debt tracking, a real structured patch-application path with validation and final task reporting, a VS Code extension with task timeline and approvals, an eval package with benchmark fixtures/scoring/regression history, security controls for local-first use, a structured debt system with dedupe/lifecycle commands, and repository privacy plus hosted cost estimation/reporting controls.
+This repository is in Phase 12: packaging and distribution. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted routing with explicit opt-in, local repo/git/shell/test/memory capability servers, capability-backed advisory outputs for test writing, architecture review, and technical debt tracking, a real structured patch-application path with validation and final task reporting, a VS Code extension with task timeline and approvals, an eval package with benchmark fixtures/scoring/regression history, security controls for local-first use, a structured debt system with dedupe/lifecycle commands, repository privacy plus hosted cost estimation/reporting controls, packaging metadata/scripts for the CLI and extension, first-run diagnostics, and SQLite schema migration support.
 
 Roadmap, phase progress, milestones, MVP definition of done, and project decisions now live in [TODO.md](/Users/jasonp/repos/dev-assistant/TODO.md).
+
+Additional setup and usage guides:
+
+- [Local Model Runtime Setup](/Users/jasonp/repos/dev-assistant/docs/local-model-runtimes.md)
+- [Example Workflows](/Users/jasonp/repos/dev-assistant/docs/example-workflows.md)
 
 ## Local-First Security Model
 
@@ -75,7 +80,10 @@ Useful CLI commands:
 # create a starter config file
 node apps/cli/dist/index.js init
 
-# inspect config health
+# inspect first-run readiness
+node apps/cli/dist/index.js doctor
+
+# inspect config health only
 node apps/cli/dist/index.js config doctor
 
 # review the current git diff
@@ -163,6 +171,10 @@ Create `dev-assistant.config.json` at the repository root when you want to overr
   "mode": "local-only",
   "repositoryPrivacy": "private",
   "routing": {},
+  "crashReporting": {
+    "enabled": false,
+    "directory": ".dev-assistant/crash-reports"
+  },
   "security": {
     "allowNetwork": false,
     "allowSecretAccess": false,
@@ -207,6 +219,10 @@ Optional hybrid routing example:
     "coder": "hosted",
     "reviewer": "local"
   },
+  "crashReporting": {
+    "enabled": false,
+    "directory": ".dev-assistant/crash-reports"
+  },
   "security": {
     "allowNetwork": true,
     "allowSecretAccess": false,
@@ -225,9 +241,11 @@ Notes:
 
 - Any command listed in `formatCommands` or `testCommands` should also appear in `allowedShellCommands`, because the shell/test path still enforces the allowlist.
 - Commands like `history`, `debt list`, `debt add`, `debt resolve`, `debt defer`, `debt export`, `config doctor`, and `test` do not require Ollama to be running.
+- `doctor` is the recommended first-run diagnostic command; it checks config health, runtime setup, SQLite store readiness, and crash-report status.
 - Commands like `run` and `review` still rely on the configured model provider.
 - `repositoryPrivacy` is a routing/safety hint for hosted review decisions and config-doctor warnings; it does not replace the explicit hosted opt-in controls.
 - Hosted cost estimates use the configured `hosted.pricing` rates and are shown before `run` and `review`, with actual returned token usage included in JSON/human summaries when providers report it.
+- Crash reporting is local-file-only and disabled by default. If enabled, reports are redacted and written under `crashReporting.directory`.
 
 ## Development
 
@@ -236,6 +254,8 @@ corepack pnpm check
 corepack pnpm typecheck
 corepack pnpm test
 corepack pnpm build
+corepack pnpm package:cli
+corepack pnpm package:vscode
 ```
 
 ## Current Caveats
@@ -243,12 +263,14 @@ corepack pnpm build
 - `dev-assistant run` now supports role-aware local/hosted routing, shows hosted cost estimates before execution, and reports observed token usage/cost when providers return it.
 - Structured coder outputs now drive a real patch workflow with repo-bound validation, optional format commands, reviewer inspection of the final diff, and a final coordinator report.
 - Configured allowlisted test commands now run through the real shell/test path.
-- The CLI now supports `init`, `review`, `test`, `debt list`, `debt add`, `debt resolve`, `debt defer`, `debt export`, `history`, `config doctor`, `--dry-run`, interactive approvals, and `--json` output.
+- The CLI now supports `init`, `doctor`, `review`, `test`, `debt list`, `debt add`, `debt resolve`, `debt defer`, `debt export`, `history`, `config doctor`, `--dry-run`, interactive approvals, and `--json` output.
 - Advisory outputs now include test-writing recommendations, architecture review recommendations, and automatic technical debt entries persisted in structured local debt state with markdown export.
+- The task store now migrates its SQLite schema automatically and the repo includes packaging scripts for CLI tarballs and VSIX builds.
 - Reviewer findings are still inconsistent about file-and-line references on local models.
 - The Test Writer is still advisory only; it recommends tests but does not apply them yet.
 - Technical debt tracking is more structured now, but external sync and further ranking heuristics are still future work.
 - The eval package provides baseline scoring and regression tracking, but it still needs to be exercised regularly against real local model runs to tune prompt quality.
 - Shell execution is safer than before, but it still runs on the host OS rather than inside a disposable VM/container sandbox.
 - Hosted routing and pricing controls are implemented and tested, but they were not live-validated here because no hosted credentials were configured in this repo.
+- VSIX packaging is scripted, but it was not executed here because the on-demand packaging tool was not fetched in this restricted environment.
 - A blocked task is currently reported in the JSON result, but the CLI still exits with code `0` unless a command-level exception is thrown.

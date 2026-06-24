@@ -2,9 +2,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
+import { inspectTaskEventStore } from "@dev-assistant/core";
 import {
   DEFAULT_CONFIG_FILE,
   ensureDataDir,
+  listCrashReports,
   estimateHostedCostForWorkflow,
   loadAssistantConfig,
   resolveRoleRouteTarget,
@@ -40,6 +42,10 @@ export function buildInitConfigTemplate(cwd: string): AssistantConfig {
     mode: "local-only",
     repositoryPrivacy: "private",
     routing: {},
+    crashReporting: {
+      enabled: false,
+      directory: ".dev-assistant/crash-reports"
+    },
     security: {
       allowNetwork: false,
       allowSecretAccess: false,
@@ -81,6 +87,13 @@ export function buildConfigDoctorReport(cwd: string) {
       message: existsSync(resolvePanicFilePath(config, cwd))
         ? "Panic mode is enabled. Clear it before running assistant actions."
         : "Panic mode is not active."
+    },
+    {
+      name: "crash-reporting",
+      status: config.crashReporting.enabled ? "warning" : "ok",
+      message: config.crashReporting.enabled
+        ? `Crash reporting is enabled and will write local reports to ${config.crashReporting.directory}.`
+        : "Crash reporting is disabled by default."
     },
     {
       name: "test-allowlist",
@@ -158,6 +171,53 @@ export function buildConfigDoctorReport(cwd: string) {
     repoPath,
     dataDir,
     checks
+  };
+}
+
+export function buildRuntimeDoctorReport(cwd: string) {
+  const configReport = buildConfigDoctorReport(cwd);
+  const config = loadAssistantConfig(cwd);
+  const dbPath = resolve(configReport.dataDir, "tasks.sqlite");
+  const storeInspection = inspectTaskEventStore(dbPath);
+  const crashReports = listCrashReports(config, cwd);
+
+  const checks = [
+    ...configReport.checks,
+    {
+      name: "task-store",
+      status: "ok" as const,
+      message: `SQLite task store schema v${storeInspection.schemaVersion} is ready at ${dbPath} (${storeInspection.taskCount} tasks, ${storeInspection.eventCount} events).`
+    },
+    {
+      name: "crash-reports",
+      status: config.crashReporting.enabled ? "warning" as const : "ok" as const,
+      message: config.crashReporting.enabled
+        ? `Crash reporting is enabled and ${crashReports.length} local report(s) are stored in ${config.crashReporting.directory}.`
+        : "Crash reporting is disabled."
+    },
+    {
+      name: "package-manager",
+      status: detectPackageManager(cwd) === "unknown" ? "warning" as const : "ok" as const,
+      message:
+        detectPackageManager(cwd) === "unknown"
+          ? "No supported package manager lockfile detected."
+          : `Detected package manager: ${detectPackageManager(cwd)}.`
+    }
+  ];
+
+  const status = checks.some((check) => check.status === "error")
+    ? "error"
+    : checks.some((check) => check.status === "warning")
+      ? "warning"
+      : "ok";
+
+  return {
+    status,
+    repoPath: configReport.repoPath,
+    dataDir: configReport.dataDir,
+    checks,
+    taskStore: storeInspection,
+    crashReportCount: crashReports.length
   };
 }
 

@@ -1,12 +1,30 @@
 {
   "name": "@dev-assistant/vscode-extension",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "displayName": "Dev Assistant",
+  "description": "Local-first multi-agent development assistant for VS Code.",
+  "publisher": "dev-assistant-local",
+  "license": "UNLICENSED",
   "type": "module",
   "main": "./dist/index.js",
   "engines": {
     "vscode": "^1.96.0"
   },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "agents",
+    "development",
+    "review"
+  ],
+  "files": [
+    "dist",
+    "resources",
+    "README.md"
+  ],
   "activationEvents": [
     "onView:devAssistant.tasks",
     "onCommand:devAssistant.startTask",
@@ -104,6 +122,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
+    "package:vsix": "npx --yes @vscode/vsce package --out ../../dist/dev-assistant.vsix",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {

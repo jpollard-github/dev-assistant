@@ -12,6 +12,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
+    "package:cli": "corepack pnpm --filter @dev-assistant/cli package:tarball",
+    "package:vscode": "corepack pnpm --filter @dev-assistant/vscode-extension package:vsix",
+    "package:all": "corepack pnpm package:cli && corepack pnpm package:vscode",
     "test": "corepack pnpm -r test",
     "typecheck": "tsc -b"
   },
