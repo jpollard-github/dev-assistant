@@ -4,7 +4,7 @@ Dev Assistant is a local-first multi-agent development assistant. The goal is to
 
 ## Current Status
 
-This repository is in Phase 9: security and safety. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted fallback support for hybrid mode, local repo/git/shell/test/memory capability servers, capability-backed advisory outputs for test writing, architecture review, and technical debt tracking, a real structured patch-application path with validation and final task reporting, a VS Code extension with task timeline and approvals, an eval package with benchmark fixtures/scoring/regression history, and security controls for secret-aware repo access, log redaction, hosted-code opt-in, provenance comments, and panic shutdown.
+This repository is in Phase 10: technical debt tracking. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted fallback support for hybrid mode, local repo/git/shell/test/memory capability servers, capability-backed advisory outputs for test writing, architecture review, and technical debt tracking, a real structured patch-application path with validation and final task reporting, a VS Code extension with task timeline and approvals, an eval package with benchmark fixtures/scoring/regression history, security controls for local-first use, and a structured debt system with dedupe, lifecycle commands, and reviewer/architecture-derived candidates.
 
 Roadmap, phase progress, milestones, MVP definition of done, and project decisions now live in [TODO.md](/Users/jasonp/repos/dev-assistant/TODO.md).
 
@@ -89,6 +89,9 @@ node apps/cli/dist/index.js run "describe the task" --dry-run
 
 # inspect debt and history
 node apps/cli/dist/index.js debt list
+node apps/cli/dist/index.js debt resolve <id>
+node apps/cli/dist/index.js debt defer <id>
+node apps/cli/dist/index.js debt export --format json
 node apps/cli/dist/index.js history
 
 # emergency stop for registered assistant subprocesses
@@ -197,7 +200,7 @@ In `hybrid` mode, the assistant tries Ollama first and falls back to the hosted 
 Notes:
 
 - Any command listed in `formatCommands` or `testCommands` should also appear in `allowedShellCommands`, because the shell/test path still enforces the allowlist.
-- Commands like `history`, `debt list`, `debt add`, `config doctor`, and `test` do not require Ollama to be running.
+- Commands like `history`, `debt list`, `debt add`, `debt resolve`, `debt defer`, `debt export`, `config doctor`, and `test` do not require Ollama to be running.
 - Commands like `run` and `review` still rely on the configured model provider.
 
 ## Development
@@ -214,11 +217,11 @@ corepack pnpm build
 - `dev-assistant run` now uses the configured Ollama model for structured agent outputs, and it can optionally fall back to a hosted Chat Completions compatible endpoint in `hybrid` mode.
 - Structured coder outputs now drive a real patch workflow with repo-bound validation, optional format commands, reviewer inspection of the final diff, and a final coordinator report.
 - Configured allowlisted test commands now run through the real shell/test path.
-- The CLI now supports `init`, `review`, `test`, `debt list`, `debt add`, `history`, `config doctor`, `--dry-run`, interactive approvals, and `--json` output.
-- Advisory outputs now include test-writing recommendations, architecture review recommendations, and automatic technical debt entries written to `.dev-assistant/debt.md`.
+- The CLI now supports `init`, `review`, `test`, `debt list`, `debt add`, `debt resolve`, `debt defer`, `debt export`, `history`, `config doctor`, `--dry-run`, interactive approvals, and `--json` output.
+- Advisory outputs now include test-writing recommendations, architecture review recommendations, and automatic technical debt entries persisted in structured local debt state with markdown export.
 - Reviewer findings are still inconsistent about file-and-line references on local models.
 - The Test Writer is still advisory only; it recommends tests but does not apply them yet.
-- Technical debt logging is still noisy and needs deduplication before it is MVP-done.
+- Technical debt tracking is more structured now, but external sync and further ranking heuristics are still future work.
 - The eval package provides baseline scoring and regression tracking, but it still needs to be exercised regularly against real local model runs to tune prompt quality.
 - Shell execution is safer than before, but it still runs on the host OS rather than inside a disposable VM/container sandbox.
 - Hosted fallback support is implemented and unit-tested, but it was not live-validated here because no hosted credentials were configured in this repo.

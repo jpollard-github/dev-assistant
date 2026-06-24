@@ -138,7 +138,10 @@ Commands:
   dev-assistant review [--json]
   dev-assistant test [--json]
   dev-assistant debt list [--json]
-  dev-assistant debt add --title "..." --priority should-fix --rationale "..." --fix "..." [--files a,b] [--task-id id] [--json]
+  dev-assistant debt add --title "..." [--severity high|medium|low|--priority must-fix|should-fix|nice-to-have] --rationale "..." --fix "..." [--files a,b] [--task-id id] [--json]
+  dev-assistant debt resolve <id> [--note "..."] [--json]
+  dev-assistant debt defer <id> [--note "..."] [--json]
+  dev-assistant debt export [--format json|markdown] [--json]
   dev-assistant history [task-id] [--json]
   dev-assistant panic [--clear] [--json]
   dev-assistant help
@@ -247,7 +250,7 @@ async function handleRun(args: string[]): Promise<void> {
       }
     });
 
-    const advisory = await buildAdvisorySummary(context, result, prompt, flags.dryRun);
+    const advisory = await buildAdvisorySummary(context, result, prompt, flags.dryRun, flags);
     const payload = {
       task: result.task,
       usage: result.usage,
@@ -372,17 +375,21 @@ async function handleDebt(args: string[]): Promise<void> {
   const subcommand = args[0] ?? "list";
 
   if (subcommand === "list") {
-    const { flags } = parseCommonFlags(args.slice(1));
+    const { flags, rest } = parseCommonFlags(args.slice(1));
     const context = createBaseCommandContext(flags.json, { enforcePanic: false });
+    const status = optionalOption(rest, "--status");
 
     try {
-      const debtLog = await context.memoryServer.readDebtLog();
+      const items = await context.memoryServer.listDebtItems({
+        includeResolved: status === "resolved",
+        ...(isDebtStatus(status) ? { status } : {})
+      });
       emit(
         flags,
         {
-          debtLog
+          items
         },
-        debtLog.trim().length > 0 ? debtLog : "No debt entries recorded yet."
+        formatDebtList(items)
       );
     } finally {
       context.store.close();
@@ -393,7 +400,8 @@ async function handleDebt(args: string[]): Promise<void> {
   if (subcommand === "add") {
     const { flags, rest } = parseCommonFlags(args.slice(1));
     const title = requireOption(rest, "--title");
-    const priority = requireOption(rest, "--priority");
+    const priority = optionalOption(rest, "--priority");
+    const severity = optionalOption(rest, "--severity");
     const rationale = requireOption(rest, "--rationale");
     const recommendedFix = requireOption(rest, "--fix");
     const files = optionalOption(rest, "--files")?.split(",").map((value) => value.trim()).filter(Boolean) ?? [];
@@ -401,18 +409,26 @@ async function handleDebt(args: string[]): Promise<void> {
     const context = createBaseCommandContext(flags.json, { enforcePanic: false });
 
     try {
-      if (!isDebtPriority(priority)) {
-        throw new Error(`Invalid priority "${priority}". Use must-fix, should-fix, or nice-to-have.`);
+      if (severity && !isDebtSeverity(severity)) {
+        throw new Error(`Invalid severity "${severity}". Use high, medium, or low.`);
       }
+
+      if (!severity && (!priority || !isDebtPriority(priority))) {
+        throw new Error(`Provide either --severity high|medium|low or --priority must-fix|should-fix|nice-to-have.`);
+      }
+
+      const normalizedSeverity = isDebtSeverity(severity) ? severity : null;
+      const normalizedPriority = priority && isDebtPriority(priority) ? priority : null;
 
       await context.memoryServer.appendDebtItems([
         {
           title,
-          priority,
+          ...(normalizedSeverity ? { severity: normalizedSeverity } : { priority: normalizedPriority! }),
           files,
           rationale,
           recommendedFix,
-          taskId
+          taskId,
+          source: "manual"
         }
       ]);
 
@@ -421,7 +437,7 @@ async function handleDebt(args: string[]): Promise<void> {
         {
           added: true,
           title,
-          priority,
+          severity: severity ?? priority ?? "medium",
           taskId,
           files
         },
@@ -433,7 +449,52 @@ async function handleDebt(args: string[]): Promise<void> {
     return;
   }
 
-  throw new Error(`Unknown debt subcommand "${subcommand}". Use "debt list" or "debt add".`);
+  if (subcommand === "resolve" || subcommand === "defer") {
+    const { flags, rest } = parseCommonFlags(args.slice(1));
+    const id = rest[0];
+    const note = optionalOption(rest, "--note") ?? undefined;
+    const context = createBaseCommandContext(flags.json, { enforcePanic: false });
+
+    try {
+      if (!id) {
+        throw new Error(`Usage: dev-assistant debt ${subcommand} <id> [--note "..."] [--json]`);
+      }
+
+      const item =
+        subcommand === "resolve"
+          ? await context.memoryServer.resolveDebtItem(id, note)
+          : await context.memoryServer.deferDebtItem(id, note);
+
+      emit(
+        flags,
+        item,
+        `${subcommand === "resolve" ? "Resolved" : "Deferred"} debt item "${item.title}" (${item.id}).`
+      );
+    } finally {
+      context.store.close();
+    }
+    return;
+  }
+
+  if (subcommand === "export") {
+    const { flags, rest } = parseCommonFlags(args.slice(1));
+    const format = optionalOption(rest, "--format") ?? "markdown";
+    const context = createBaseCommandContext(flags.json, { enforcePanic: false });
+
+    try {
+      if (format !== "markdown" && format !== "json") {
+        throw new Error(`Invalid export format "${format}". Use markdown or json.`);
+      }
+
+      const output = await context.memoryServer.exportDebtItems(format);
+      emit(flags, { format, output }, output.trim().length > 0 ? output : "No debt entries recorded yet.");
+    } finally {
+      context.store.close();
+    }
+    return;
+  }
+
+  throw new Error(`Unknown debt subcommand "${subcommand}". Use "debt list", "debt add", "debt resolve", "debt defer", or "debt export".`);
 }
 
 async function handleConfigDoctor(args: string[]): Promise<void> {
@@ -610,7 +671,8 @@ async function buildAdvisorySummary(
     readonly outputs: Partial<AgentOutputMap>;
   },
   prompt: string,
-  dryRun: boolean
+  dryRun: boolean,
+  flags: RunFlags
 ): Promise<{
   readonly testWriter: Awaited<ReturnType<typeof context.advisoryToolkit.testWriter>>["output"] | null;
   readonly architectureReview:
@@ -648,12 +710,38 @@ async function buildAdvisorySummary(
   });
 
   if (!dryRun) {
-    await context.memoryServer.appendDebtItems(
-      technicalDebt.output.items.map((item) => ({
-        ...item,
-        taskId: result.task.id
+    const generatedItems = [
+      ...technicalDebt.output.items.map((item) => ({
+        title: item.title,
+        severity: mapDebtPriorityToSeverity(item.priority),
+        files: [...item.files],
+        rationale: item.rationale,
+        recommendedFix: item.recommendedFix,
+        taskId: result.task.id,
+        source: "technical-debt-agent" as const
+      })),
+      ...result.outputs.reviewer.findings.map((finding, index) => ({
+        title: `Reviewer finding ${index + 1}: ${truncateSentence(finding.message)}`,
+        severity: mapReviewerSeverity(finding.severity),
+        files: finding.filePath ? [finding.filePath] : [],
+        rationale: finding.message,
+        recommendedFix: "Address the reviewer finding and rerun the relevant tests.",
+        taskId: result.task.id,
+        source: "reviewer" as const
+      })),
+      ...architectureReview.output.recommendations.map((recommendation, index) => ({
+        title: `Architecture recommendation ${index + 1}: ${truncateSentence(recommendation.message)}`,
+        severity: mapReviewerSeverity(recommendation.severity),
+        files: recommendation.filePath ? [recommendation.filePath] : [],
+        rationale: recommendation.message,
+        recommendedFix: "Refactor the boundary or dependency direction before the concern spreads further.",
+        taskId: result.task.id,
+        source: "architecture-review" as const
       }))
-    );
+    ];
+
+    const approvedItems = await filterNoisyDebtItems(generatedItems, flags);
+    await context.memoryServer.appendDebtItems(approvedItems);
   }
 
   return {
@@ -799,6 +887,113 @@ function requireHostedApiKey(envVarName: string): string {
   }
 
   return apiKey;
+}
+
+function formatDebtList(
+  items: ReadonlyArray<{
+    readonly id: string;
+    readonly title: string;
+    readonly severity: string;
+    readonly status: string;
+    readonly files: readonly string[];
+    readonly ageDays: number;
+  }>
+): string {
+  if (items.length === 0) {
+    return "No debt entries recorded yet.";
+  }
+
+  return items
+    .map(
+      (item) =>
+        `- ${item.id} [${item.severity}/${item.status}] ${item.title} (${item.ageDays}d old${item.files.length > 0 ? `; ${item.files.join(", ")}` : ""})`
+    )
+    .join("\n");
+}
+
+async function filterNoisyDebtItems<
+  T extends {
+    readonly title: string;
+    readonly severity: "high" | "medium" | "low";
+    readonly files: readonly string[];
+    readonly source: string;
+  }
+>(items: readonly T[], flags: RunFlags): Promise<T[]> {
+  const kept: T[] = [];
+
+  for (const item of items) {
+    if (!isNoisyDebtItem(item)) {
+      kept.push(item);
+      continue;
+    }
+
+    if (flags.approve) {
+      kept.push(item);
+      continue;
+    }
+
+    const approved = await confirmDebtCandidate(item);
+    if (approved) {
+      kept.push(item);
+    }
+  }
+
+  return kept;
+}
+
+function isNoisyDebtItem(item: {
+  readonly severity: "high" | "medium" | "low";
+  readonly files: readonly string[];
+  readonly title: string;
+}): boolean {
+  return item.severity === "low" || item.files.length === 0 || item.title.length > 110;
+}
+
+async function confirmDebtCandidate(item: {
+  readonly title: string;
+  readonly severity: string;
+  readonly files: readonly string[];
+  readonly source: string;
+}): Promise<boolean> {
+  if (!stdin.isTTY || !stdout.isTTY) {
+    return false;
+  }
+
+  const rl = createInterface({ input: stdin, output: stdout });
+  try {
+    const answer = await rl.question(
+      `Add low-signal debt candidate from ${item.source}? "${item.title}" [severity=${item.severity}${item.files.length > 0 ? ` files=${item.files.join(",")}` : ""}] [y/N] `
+    );
+    return /^y(es)?$/i.test(answer.trim());
+  } finally {
+    rl.close();
+  }
+}
+
+function mapDebtPriorityToSeverity(priority: "must-fix" | "should-fix" | "nice-to-have"): "high" | "medium" | "low" {
+  switch (priority) {
+    case "must-fix":
+      return "high";
+    case "should-fix":
+      return "medium";
+    case "nice-to-have":
+      return "low";
+  }
+}
+
+function mapReviewerSeverity(severity: "low" | "medium" | "high"): "high" | "medium" | "low" {
+  switch (severity) {
+    case "high":
+      return "high";
+    case "medium":
+      return "medium";
+    case "low":
+      return "low";
+  }
+}
+
+function truncateSentence(value: string, maxLength = 72): string {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 3)}...`;
 }
 
 function normalizeAgentOutput<TRole extends keyof AgentOutputMap>(
@@ -976,4 +1171,12 @@ function formatDoctorReport(report: {
 
 function isDebtPriority(value: string): value is "must-fix" | "should-fix" | "nice-to-have" {
   return value === "must-fix" || value === "should-fix" || value === "nice-to-have";
+}
+
+function isDebtSeverity(value: string | null): value is "high" | "medium" | "low" {
+  return value === "high" || value === "medium" || value === "low";
+}
+
+function isDebtStatus(value: string | null): value is "open" | "deferred" | "resolved" {
+  return value === "open" || value === "deferred" || value === "resolved";
 }

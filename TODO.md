@@ -10,7 +10,7 @@ This file is the planning source of truth for the repository.
 
 ## Current Status
 
-Current phase: Phase 9 complete, with Phase 4 follow-up items still open.
+Current phase: Phase 10 complete, with Phase 4 follow-up items still open.
 
 What is implemented today:
 
@@ -29,11 +29,12 @@ What is implemented today:
 - Phase 7 now includes a functional VS Code extension package with an activity-bar sidebar, active-task timeline, native diff previews for patch approvals, modal approval controls for edits and shell commands, task cancellation, workspace trust gating, and history/test/debt/review commands surfaced in the editor.
 - Phase 8 now includes benchmark fixtures across six task categories, fixture materialization helpers, outcome scoring for the planned MVP quality gates, a multi-model eval matrix runner, regression-history persistence, and a golden structured-output suite for agent/advisory schemas.
 - Phase 9 now includes secret-aware repo access defaults, log redaction, network-disabled shell execution by default, hosted code-context opt-in requirements, provenance comments for generated code, panic mode for killing registered subprocesses, and a written threat model in `docs/security-threat-model.md`.
+- Phase 10 now includes a structured debt item schema, duplicate detection, auto-created debt candidates from reviewer and architecture findings, noisy-item confirmation, aging/severity sorting, and CLI commands to list, resolve, defer, and export debt items.
 
 What that means for MVP:
 
 - The project has crossed into an early MVP-capable state for small, low-risk tasks in both the CLI and VS Code.
-- The biggest remaining unlocks are better reviewer precision in live runs, real test-writing/edit application, and reducing technical-debt noise.
+- The biggest remaining unlocks are better reviewer precision in live runs and real test-writing/edit application.
 - Security posture is now materially stronger for local-first use, but deeper isolation and secret-scanning follow-ups still remain for later phases.
 
 ## Implemented Decisions
@@ -64,7 +65,7 @@ What that means for MVP:
 
 - Remaining Phase 4 reviewer precision work now has baseline eval coverage, but still needs live prompt/model tuning plus stronger file-and-line citation consistency.
 - Remaining Phase 4 Test Writer implementation now has evaluation coverage, but still needs real test-authoring/apply workflow support instead of advisory output only.
-- Remaining technical debt signal-to-noise work depends mostly on Phase 10 debt schema, deduplication, and confirmation flows.
+- Technical debt tracking now has structured schema, deduplication, and confirmation flows; the main remaining follow-up is optional external sync and further quality tuning.
 - The Post-Phase 4 dynamic role selection follow-up now has evaluation fixtures and regression traces to build on, with Phase 11 role-specific routing likely shaping the final design.
 
 ## Product Thesis
@@ -259,7 +260,7 @@ This phase replaces the current stubbed shell/test execution path with real tool
   - [x] records debt items in `.dev-assistant/debt.md` or SQLite
   - [x] links each item to files and task history
   - [x] distinguishes must-fix, should-fix, and nice-to-have
-  Note: debt quality and noise control are expected to improve substantially in Phase 10.
+  Note: Phase 10 now adds structured debt storage, duplicate detection, confirmation for noisy items, and lifecycle commands.
 
 ## Post-Phase 4 Follow-Up
 
@@ -370,19 +371,19 @@ This phase replaces the current no-op patch applier with a real, controlled patc
 
 ## Phase 10: Technical Debt Tracking
 
-- [ ] Define a debt item schema:
-  - [ ] title
-  - [ ] severity
-  - [ ] files
-  - [ ] rationale
-  - [ ] recommended fix
-  - [ ] first seen task
-  - [ ] status
-- [ ] Auto-create debt candidates from reviewer and architecture findings.
-- [ ] Require user confirmation before adding noisy debt items.
-- [ ] Add duplicate detection.
-- [ ] Add debt aging and priority sorting.
-- [ ] Add commands to resolve, defer, and export debt.
+- [x] Define a debt item schema:
+  - [x] title
+  - [x] severity
+  - [x] files
+  - [x] rationale
+  - [x] recommended fix
+  - [x] first seen task
+  - [x] status
+- [x] Auto-create debt candidates from reviewer and architecture findings.
+- [x] Require user confirmation before adding noisy debt items.
+- [x] Add duplicate detection.
+- [x] Add debt aging and priority sorting.
+- [x] Add commands to resolve, defer, and export debt.
 - [ ] Optionally sync debt to GitHub Issues later.
 
 ## Phase 11: Hosted Model Option
@@ -546,6 +547,7 @@ Add:
 - [x] SQLite event history.
 - [x] Debt log.
 - [x] Evaluation fixtures.
+- [x] Structured debt lifecycle commands and deduplication.
 - [ ] Role-specific local model routing.
 
 ## Suggested Third Milestone
@@ -568,6 +570,16 @@ Add:
 - [x] Panic mode and subprocess termination.
 - [x] Threat model documentation.
 
+## Suggested Fifth Milestone
+
+Add:
+
+- [x] Structured debt schema and storage.
+- [x] Duplicate detection and aging-based sorting.
+- [x] Reviewer and architecture debt candidates.
+- [x] Noisy-item confirmation flow.
+- [x] Resolve, defer, and export debt commands.
+
 ## Definition Of Done For MVP
 
 - [ ] Can run against at least three real TypeScript repositories.
@@ -575,7 +587,7 @@ Add:
 - [ ] Produces review findings that are sometimes genuinely useful.
 - [ ] Can add or update tests for simple changes.
 - [x] Runs configured tests and summarizes failures accurately.
-- [ ] Tracks technical debt without excessive noise.
+- [x] Tracks technical debt without excessive noise.
 - [x] Keeps all source local unless hosted mode is explicitly enabled.
 - [x] Has clear logs for every agent decision and tool call.
 - [x] Has basic evals that catch regressions.

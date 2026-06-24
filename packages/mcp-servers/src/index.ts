@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, extname, join, relative, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { DatabaseSync } from "node:sqlite";
@@ -8,6 +9,16 @@ import { DatabaseSync } from "node:sqlite";
 import type { ShellCommandResult, ShellRunner } from "@dev-assistant/core";
 import type { FileOperation } from "@dev-assistant/agents";
 import { containsLikelyNetworkCommand, isSensitivePath, redactString } from "@dev-assistant/shared";
+import {
+  debtStoreSchema,
+  debtItemInputSchema,
+  mapPriorityToSeverity,
+  rankDebtSeverity,
+  renderDebtItemsAsMarkdown,
+  type DebtItem,
+  type DebtItemInput,
+  type DebtStatus
+} from "../../shared/src/debt.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -152,14 +163,24 @@ export interface MemoryMcpServer {
   readRepositoryFacts(): Promise<Record<string, unknown>>;
   writeRepositoryFacts(facts: Record<string, unknown>): Promise<void>;
   readDebtLog(): Promise<string>;
+  listDebtItems(options?: {
+    readonly includeResolved?: boolean;
+    readonly status?: DebtStatus;
+  }): Promise<readonly (DebtItem & { readonly ageDays: number })[]>;
   appendDebtItems(items: readonly {
     title: string;
-    priority: "must-fix" | "should-fix" | "nice-to-have";
+    priority?: "must-fix" | "should-fix" | "nice-to-have";
+    severity?: "high" | "medium" | "low";
     files: readonly string[];
     rationale: string;
     recommendedFix: string;
     taskId: string;
+    source?: "manual" | "technical-debt-agent" | "reviewer" | "architecture-review";
+    status?: DebtStatus;
   }[]): Promise<void>;
+  resolveDebtItem(id: string, note?: string): Promise<DebtItem>;
+  deferDebtItem(id: string, note?: string): Promise<DebtItem>;
+  exportDebtItems(format?: "json" | "markdown"): Promise<string>;
   listRecurringFailurePatterns(limit?: number): Promise<readonly MemoryFailurePattern[]>;
 }
 
@@ -639,6 +660,7 @@ export function createMemoryMcpServer(params: {
   const dbPath = join(params.dataDir, "tasks.sqlite");
   const factsPath = join(params.dataDir, "repo-facts.json");
   const debtPath = join(params.dataDir, "debt.md");
+  const debtItemsPath = join(params.dataDir, "debt-items.json");
 
   return {
     async listTaskHistory(limit = 20) {
@@ -672,34 +694,101 @@ export function createMemoryMcpServer(params: {
       await writeFile(factsPath, JSON.stringify(facts, null, 2), "utf8");
     },
     async readDebtLog() {
+      const items = await this.listDebtItems({ includeResolved: true });
+      if (items.length > 0) {
+        return renderDebtItemsAsMarkdown(items);
+      }
+
       if (!fileExists(debtPath)) {
         return "";
       }
       return readFile(debtPath, "utf8");
+    },
+    async listDebtItems(options = {}) {
+      const store = readDebtStore(debtItemsPath);
+      return sortDebtItems(
+        store.items
+          .filter((item) => (options.includeResolved ? true : item.status !== "resolved"))
+          .filter((item) => (options.status ? item.status === options.status : true))
+          .map((item) => ({
+            ...item,
+            ageDays: calculateAgeDays(item.createdAt)
+          }))
+      );
     },
     async appendDebtItems(items) {
       if (items.length === 0) {
         return;
       }
 
-      const existing = fileExists(debtPath) ? await readFile(debtPath, "utf8") : "";
-      const additions = items
-        .map((item) => {
-          const files = item.files.length > 0 ? item.files.join(", ") : "n/a";
-          return [
-            `## ${item.title}`,
-            `- priority: ${item.priority}`,
-            `- task: ${item.taskId}`,
-            `- files: ${files}`,
-            `- rationale: ${item.rationale}`,
-            `- recommended fix: ${item.recommendedFix}`
-          ].join("\n");
-        })
-        .join("\n\n");
+      const store = readDebtStore(debtItemsPath);
 
-      const next = existing.trim().length > 0 ? `${existing.trim()}\n\n${additions}\n` : `${additions}\n`;
+      for (const item of items) {
+        const normalized = debtItemInputSchema.parse({
+          title: item.title,
+          severity: item.severity ?? (item.priority ? mapPriorityToSeverity(item.priority) : "medium"),
+          files: [...item.files],
+          rationale: item.rationale,
+          recommendedFix: item.recommendedFix,
+          firstSeenTask: item.taskId,
+          source: item.source ?? "manual",
+          status: item.status ?? "open"
+        });
+
+        const duplicate = findDuplicateDebtItem(store.items, normalized);
+        if (duplicate) {
+          duplicate.updatedAt = new Date().toISOString();
+          if (duplicate.status === "resolved") {
+            duplicate.status = "open";
+          }
+          continue;
+        }
+
+        store.items.push({
+          id: randomUUID(),
+          title: normalized.title,
+          severity: normalized.severity,
+          files: [...normalized.files],
+          rationale: normalized.rationale,
+          recommendedFix: normalized.recommendedFix,
+          firstSeenTask: normalized.firstSeenTask,
+          status: normalized.status,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          source: normalized.source
+        });
+      }
+
+      writeDebtStore(debtItemsPath, store);
       mkdirSync(dirname(debtPath), { recursive: true });
-      await writeFile(debtPath, next, "utf8");
+      await writeFile(debtPath, renderDebtItemsAsMarkdown(sortDebtItems(withAgeDays(store.items))), "utf8");
+    },
+    async resolveDebtItem(id, note) {
+      const store = readDebtStore(debtItemsPath);
+      const item = requireDebtItem(store.items, id);
+      item.status = "resolved";
+      item.updatedAt = new Date().toISOString();
+      item.resolutionNote = note;
+      writeDebtStore(debtItemsPath, store);
+      await writeFile(debtPath, renderDebtItemsAsMarkdown(sortDebtItems(withAgeDays(store.items))), "utf8");
+      return item;
+    },
+    async deferDebtItem(id, note) {
+      const store = readDebtStore(debtItemsPath);
+      const item = requireDebtItem(store.items, id);
+      item.status = "deferred";
+      item.updatedAt = new Date().toISOString();
+      item.resolutionNote = note;
+      writeDebtStore(debtItemsPath, store);
+      await writeFile(debtPath, renderDebtItemsAsMarkdown(sortDebtItems(withAgeDays(store.items))), "utf8");
+      return item;
+    },
+    async exportDebtItems(format = "markdown") {
+      const items = sortDebtItems(withAgeDays(readDebtStore(debtItemsPath).items));
+      if (format === "json") {
+        return JSON.stringify(items, null, 2);
+      }
+      return renderDebtItemsAsMarkdown(items);
     },
     async listRecurringFailurePatterns(limit = 10) {
       if (!fileExists(dbPath)) {
@@ -926,6 +1015,94 @@ function parseRipgrepLine(line: string): RepoSearchResult {
 
 function fileExists(path: string): boolean {
   return statSyncSafe(path) !== null;
+}
+
+function readDebtStore(path: string): { version: 1; items: DebtItem[] } {
+  try {
+    return debtStoreSchema.parse(JSON.parse(readFileSync(path, "utf8"))) as { version: 1; items: DebtItem[] };
+  } catch {
+    return {
+      version: 1,
+      items: []
+    };
+  }
+}
+
+function writeDebtStore(path: string, store: { version: 1; items: DebtItem[] }): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(store, null, 2).concat("\n"), "utf8");
+}
+
+function requireDebtItem(items: DebtItem[], id: string): DebtItem {
+  const item = items.find((entry) => entry.id === id);
+  if (!item) {
+    throw new Error(`Debt item "${id}" was not found.`);
+  }
+  return item;
+}
+
+function findDuplicateDebtItem(items: DebtItem[], candidate: DebtItemInput): DebtItem | null {
+  const normalizedTitle = normalizeDebtText(candidate.title);
+  const normalizedFiles = candidate.files.map((file) => file.toLowerCase()).sort().join("|");
+
+  return (
+    items.find((item) => {
+      const sameTitle = normalizeDebtText(item.title) === normalizedTitle;
+      const sameFiles = item.files.map((file) => file.toLowerCase()).sort().join("|") === normalizedFiles;
+      const sameRationale = normalizeDebtText(item.rationale) === normalizeDebtText(candidate.rationale);
+      return sameTitle || (normalizedFiles.length > 0 && sameFiles && sameRationale);
+    }) ?? null
+  );
+}
+
+function normalizeDebtText(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function calculateAgeDays(createdAt: string): number {
+  const created = new Date(createdAt).getTime();
+  const diffMs = Math.max(Date.now() - created, 0);
+  return Math.floor(diffMs / 86_400_000);
+}
+
+function withAgeDays(items: readonly DebtItem[]): Array<DebtItem & { readonly ageDays: number }> {
+  return items.map((item) => ({
+    ...item,
+    ageDays: calculateAgeDays(item.createdAt)
+  }));
+}
+
+function sortDebtItems<T extends { severity: "high" | "medium" | "low"; ageDays: number; status: string; title: string }>(
+  items: readonly T[]
+): T[] {
+  return [...items].sort((left, right) => {
+    const statusRank = debtStatusRank(left.status) - debtStatusRank(right.status);
+    if (statusRank !== 0) {
+      return statusRank;
+    }
+    const severityRank = rankDebtSeverity(right.severity) - rankDebtSeverity(left.severity);
+    if (severityRank !== 0) {
+      return severityRank;
+    }
+    const ageRank = right.ageDays - left.ageDays;
+    if (ageRank !== 0) {
+      return ageRank;
+    }
+    return left.title.localeCompare(right.title);
+  });
+}
+
+function debtStatusRank(status: string): number {
+  switch (status) {
+    case "open":
+      return 0;
+    case "deferred":
+      return 1;
+    case "resolved":
+      return 2;
+    default:
+      return 3;
+  }
 }
 
 function assertRepoPathAllowed(path: string, policy: RepoAccessPolicy): void {

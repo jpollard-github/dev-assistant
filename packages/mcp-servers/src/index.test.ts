@@ -275,17 +275,41 @@ describe("memory MCP server", () => {
     await server.appendDebtItems([
       {
         title: "Fix flaky test",
-        priority: "should-fix",
+        severity: "medium",
         files: ["src/index.ts"],
         rationale: "The current fixture has a follow-up note.",
         recommendedFix: "Stabilize the flaky assertion.",
-        taskId: "task-1"
+        taskId: "task-1",
+        source: "manual"
       }
     ]);
+    await server.appendDebtItems([
+      {
+        title: "Fix flaky test",
+        severity: "medium",
+        files: ["src/index.ts"],
+        rationale: "The current fixture has a follow-up note.",
+        recommendedFix: "Stabilize the flaky assertion.",
+        taskId: "task-1",
+        source: "reviewer"
+      }
+    ]);
+
+    const listed = await server.listDebtItems();
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.status).toBe("open");
+    expect(listed[0]?.ageDays).toBeGreaterThanOrEqual(0);
+
+    const deferred = await server.deferDebtItem(listed[0]!.id, "Waiting for broader cleanup");
+    expect(deferred.status).toBe("deferred");
+
+    const resolved = await server.resolveDebtItem(listed[0]!.id, "Handled in follow-up");
+    expect(resolved.status).toBe("resolved");
 
     expect((await server.listTaskHistory(5))[0]?.title).toBe("Test task");
     expect((await server.readRepositoryFacts()).framework).toBe("typescript");
     expect(await server.readDebtLog()).toContain("Fix flaky test");
+    expect(await server.exportDebtItems("json")).toContain("\"title\": \"Fix flaky test\"");
     expect((await server.listRecurringFailurePatterns(5))[0]?.reason).toContain("Configured tests");
   });
 });

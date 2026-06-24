@@ -110,4 +110,14 @@ describe("CLI helpers", () => {
     expect(report.checks.some((check) => check.name === "hosted-code-context" && check.status === "warning")).toBe(true);
     expect(report.checks.some((check) => check.name === "network-policy" && check.status === "ok")).toBe(true);
   });
+
+  it("includes the structured debt security defaults in generated init config", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "dev-assistant-cli-"));
+    writeFileSync(join(cwd, "package.json"), JSON.stringify({ name: "fixture" }, null, 2));
+
+    const template = buildInitConfigTemplate(cwd);
+    expect(template.security.requireProvenanceComments).toBe(true);
+    expect(template.security.allowSecretAccess).toBe(false);
+    expect(template.security.panicFile).toContain(".dev-assistant");
+  });
 });

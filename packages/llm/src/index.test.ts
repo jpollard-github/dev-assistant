@@ -220,7 +220,19 @@ function createFakeServers(): {
     async readDebtLog() {
       return "";
     },
+    async listDebtItems() {
+      return [];
+    },
     async appendDebtItems() {},
+    async resolveDebtItem() {
+      throw new Error("not implemented");
+    },
+    async deferDebtItem() {
+      throw new Error("not implemented");
+    },
+    async exportDebtItems() {
+      return "";
+    },
     async listRecurringFailurePatterns() {
       return [{ reason: "Configured tests did not pass.", count: 2 }];
     }
