@@ -12,6 +12,7 @@ import {
 import {
   createGitMcpServer,
   createMemoryMcpServer,
+  createPatchMcpServer,
   createRepoMcpServer,
   createShellMcpServer,
   createShellRunnerFromMcpServer,
@@ -90,6 +91,11 @@ async function runTask(args: string[]): Promise<void> {
     repoPath,
     shellServer
   });
+  const patchServer = createPatchMcpServer({
+    repoPath,
+    formatCommands: config.formatCommands,
+    shellServer
+  });
   const memoryServer = createMemoryMcpServer({
     repoPath,
     dataDir
@@ -130,6 +136,11 @@ async function runTask(args: string[]): Promise<void> {
   const coordinator = new TaskCoordinator({
     store,
     agents,
+    patchApplier: {
+      apply(_taskId, proposal) {
+        return patchServer.applyProposal(proposal);
+      }
+    },
     shellRunner: createShellRunnerFromMcpServer(shellServer),
     approvalDecider: {
       decide(request) {
@@ -170,6 +181,7 @@ async function runTask(args: string[]): Promise<void> {
     config: {
       allowedShellCommands: config.allowedShellCommands,
       approvalPolicy: config.approvalPolicy,
+      formatCommands: config.formatCommands,
       testCommands: config.testCommands
     }
   });
@@ -232,11 +244,12 @@ async function runTask(args: string[]): Promise<void> {
         approvals: result.approvals,
         outputRoles: Object.keys(result.outputs),
         summary: {
-          changedFiles: result.outputs.coder?.files.map((file) => file.path) ?? [],
+          changedFiles: result.outputs["coordinator-report"]?.changedFiles ?? [],
           reviewerApproved: result.outputs.reviewer?.approved ?? null,
           reviewerFindings: result.outputs.reviewer?.findings ?? [],
           testPassed: result.outputs["test-runner"]?.passed ?? null,
-          testCommandResults: result.outputs["test-runner"]?.commandResults ?? []
+          testCommandResults: result.outputs["test-runner"]?.commandResults ?? [],
+          finalReport: result.outputs["coordinator-report"] ?? null
         },
         advisory: advisorySummary
       },

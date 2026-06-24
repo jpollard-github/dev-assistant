@@ -23,6 +23,7 @@ export const assistantConfigSchema = z.object({
     })
     .optional(),
   allowedShellCommands: z.array(z.string().min(1)).default([]),
+  formatCommands: z.array(z.string().min(1)).default([]),
   testCommands: z.array(z.string().min(1)).default([]),
   approvalPolicy: approvalPolicySchema.default("on-risky-action"),
   dataDir: z.string().min(1).default(".dev-assistant"),

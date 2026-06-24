@@ -42,10 +42,17 @@ const DEFAULT_PATCH_APPLIER: PatchApplier = {
     return {
       applied: true,
       changedFiles: proposal.files.map((file) => file.path),
+      operations: proposal.operations,
       summary:
         proposal.files.length > 0
           ? `Accepted proposed patch for ${proposal.files.length} file(s).`
-          : `No-op patch recorded for task ${taskId}.`
+          : `No-op patch recorded for task ${taskId}.`,
+      finalDiff: proposal.diff,
+      fileSnapshots: proposal.operations.map((operation) => ({
+        path: operation.path,
+        content: operation.changeType === "delete" ? null : operation.content ?? null
+      })),
+      formattingCommands: []
     };
   }
 };
@@ -117,6 +124,7 @@ export class TaskCoordinator {
     const config = {
       approvalPolicy: request.config?.approvalPolicy ?? this.options.approvalPolicy,
       allowedShellCommands: request.config?.allowedShellCommands ?? [],
+      formatCommands: request.config?.formatCommands ?? [],
       testCommands: request.config?.testCommands ?? []
     };
 
@@ -194,6 +202,18 @@ export class TaskCoordinator {
         }
       }
 
+      await this.recordEvent({
+        taskId,
+        type: "patch.previewed",
+        payload: {
+          summary: proposal.summary,
+          files:
+            proposal.files.length > 0
+              ? proposal.files.map((file) => file.path)
+              : proposal.operations.map((operation) => operation.path)
+        }
+      });
+
       const patchResult = await this.patchApplier.apply(taskId, proposal);
       usage.changedFiles += patchResult.changedFiles.length;
       await this.enforceBudget(
@@ -233,61 +253,87 @@ export class TaskCoordinator {
         "Reviewer inspected the applied diff."
       );
 
+      let blockerReason: string | undefined;
+      let testReport: AgentOutputMap["test-runner"] | null = null;
+
       if (!review.approved) {
-        throw new BlockedTaskError("Reviewer rejected the patch proposal.");
-      }
+        blockerReason = "Reviewer rejected the patch proposal.";
+      } else {
+        const shellResults: Awaited<ReturnType<ShellRunner["run"]>>[] = [];
+        for (const command of config.testCommands) {
+          await this.enforceBudget(
+            taskId,
+            budget,
+            "maxShellCommands",
+            usage.shellCommands + 1,
+            startedAt,
+            usage
+          );
 
-      const shellResults: Awaited<ReturnType<ShellRunner["run"]>>[] = [];
-      for (const command of config.testCommands) {
-        await this.enforceBudget(
-          taskId,
-          budget,
-          "maxShellCommands",
-          usage.shellCommands + 1,
-          startedAt,
-          usage
-        );
+          if (this.requiresShellApproval(command, config.allowedShellCommands, config.approvalPolicy)) {
+            const decision = await this.requestApproval(taskId, {
+              kind: "shell-command",
+              reason: "Shell command is not in the configured allowlist.",
+              command
+            });
+            approvals.push(decision);
 
-        if (this.requiresShellApproval(command, config.allowedShellCommands, config.approvalPolicy)) {
-          const decision = await this.requestApproval(taskId, {
-            kind: "shell-command",
-            reason: "Shell command is not in the configured allowlist.",
-            command
-          });
-          approvals.push(decision);
-
-          if (!decision.approved) {
-            throw new BlockedTaskError(`Shell command approval denied: ${decision.rationale}`);
+            if (!decision.approved) {
+              throw new BlockedTaskError(`Shell command approval denied: ${decision.rationale}`);
+            }
           }
+
+          const result = await this.shellRunner.run(command);
+          usage.shellCommands += 1;
+          shellResults.push(result);
+          await this.recordToolResult(taskId, "shell-runner", result);
         }
 
-        const result = await this.shellRunner.run(command);
-        usage.shellCommands += 1;
-        shellResults.push(result);
-        await this.recordToolResult(taskId, "shell-runner", result);
+        testReport = await this.invokeAgent(
+          "test-runner",
+          {
+            taskId,
+            prompt: request.prompt,
+            commands: shellResults
+          },
+          usage,
+          budget,
+          startedAt
+        );
+        outputs["test-runner"] = testReport;
+        currentStatus = await this.transition(
+          taskId,
+          currentStatus,
+          "tested",
+          "Test runner summarized the execution results."
+        );
+
+        if (!testReport.passed) {
+          blockerReason = "Configured tests did not pass.";
+        }
       }
 
-      const testReport = await this.invokeAgent(
-        "test-runner",
+      const finalReport = await this.invokeAgent(
+        "coordinator-report",
         {
           taskId,
           prompt: request.prompt,
-          commands: shellResults
+          plan,
+          proposal,
+          patchResult,
+          reviewer: review,
+          testReport,
+          outcome: blockerReason ? "blocked" : "completed",
+          ...(blockerReason === undefined ? {} : { blockerReason })
         },
         usage,
         budget,
         startedAt
       );
-      outputs["test-runner"] = testReport;
-      currentStatus = await this.transition(
-        taskId,
-        currentStatus,
-        "tested",
-        "Test runner summarized the execution results."
-      );
+      outputs["coordinator-report"] = finalReport;
 
-      if (!testReport.passed) {
-        throw new BlockedTaskError("Configured tests did not pass.");
+      if (blockerReason) {
+        throw new BlockedTaskError(blockerReason);
       }
 
       currentStatus = await this.transition(
@@ -300,7 +346,7 @@ export class TaskCoordinator {
         taskId,
         type: "task.completed",
         payload: {
-          summary: `${plan.summary} ${review.summary} ${testReport.summary}`.trim()
+          summary: finalReport.summary
         }
       });
     } catch (error) {
@@ -571,7 +617,7 @@ export class TaskCoordinator {
       return true;
     }
 
-    return proposal.files.length > 0;
+    return proposal.files.length > 0 || proposal.operations.length > 0;
   }
 
   private requiresShellApproval(
@@ -644,6 +690,7 @@ export function createDemoAgentHandlers(): AgentHandlers {
           "Phase 1 uses injected agent contracts so the coordinator can validate and persist outputs before Phase 2 adds real model backends.",
         diff: `--- /dev/null\n+++ /dev/null\n@@\n+# Planned work for task: ${input.prompt}\n`,
         files: [],
+        operations: [],
         commands: []
       };
     },
@@ -668,6 +715,21 @@ export function createDemoAgentHandlers(): AgentHandlers {
           stdout: command.stdout,
           stderr: command.stderr
         }))
+      };
+    },
+    "coordinator-report"(input) {
+      return {
+        summary:
+          input.outcome === "completed"
+            ? `Completed task with ${input.patchResult.changedFiles.length} changed file(s).`
+            : `Task blocked after patch review/testing: ${input.blockerReason ?? "unknown blocker"}.`,
+        outcome: input.outcome,
+        changedFiles: [...input.patchResult.changedFiles],
+        testsPassed: input.testReport?.passed ?? null,
+        followUps:
+          input.outcome === "completed"
+            ? []
+            : [input.blockerReason ?? "Investigate the blocker before retrying."]
       };
     }
   };

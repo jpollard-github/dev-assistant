@@ -1,11 +1,12 @@
 import { mkdirSync, readFileSync, statSync } from "node:fs";
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { DatabaseSync } from "node:sqlite";
 
 import type { ShellCommandResult, ShellRunner } from "@dev-assistant/core";
+import type { FileOperation } from "@dev-assistant/agents";
 
 const execFileAsync = promisify(execFile);
 
@@ -78,6 +79,28 @@ export interface ShellExecutionResult extends ShellCommandResult {
 export interface ShellMcpServer {
   readonly policy: ShellExecutionPolicy;
   run(command: string): Promise<ShellExecutionResult>;
+}
+
+export interface PatchApplySummary {
+  readonly applied: boolean;
+  readonly changedFiles: readonly string[];
+  readonly operations: readonly FileOperation[];
+  readonly summary: string;
+  readonly finalDiff: string;
+  readonly fileSnapshots: readonly {
+    readonly path: string;
+    readonly content: string | null;
+  }[];
+  readonly formattingCommands: readonly ShellExecutionResult[];
+}
+
+export interface PatchMcpServer {
+  applyProposal(proposal: {
+    readonly summary: string;
+    readonly operations: readonly FileOperation[];
+    readonly files: readonly { path: string; changeType: "create" | "update" | "delete" }[];
+    readonly diff: string;
+  }): Promise<PatchApplySummary>;
 }
 
 export interface ParsedTestOutput {
@@ -456,6 +479,114 @@ export function createTestMcpServer(params: {
   };
 }
 
+export function createPatchMcpServer(params: {
+  readonly repoPath: string;
+  readonly formatCommands?: readonly string[];
+  readonly shellServer?: ShellMcpServer;
+}): PatchMcpServer {
+  const repoPath = resolve(params.repoPath);
+
+  return {
+    async applyProposal(proposal) {
+      const operations = proposal.operations.map((operation) => ({
+        ...operation,
+        path: normalizeRepoRelative(repoPath, resolve(repoPath, operation.path))
+      }));
+      const declaredFiles = proposal.files.map((file) =>
+        normalizeRepoRelative(repoPath, resolve(repoPath, file.path))
+      );
+      const operationPaths = operations.map((operation) => operation.path);
+
+      if (operations.length === 0) {
+        if (declaredFiles.length > 0) {
+          throw new Error(
+            "Patch proposal declared changed files but did not include structured operations."
+          );
+        }
+
+        return {
+          applied: true,
+          changedFiles: [],
+          operations: [],
+          summary: proposal.summary || "No file changes were proposed.",
+          finalDiff: "",
+          fileSnapshots: [],
+          formattingCommands: []
+        };
+      }
+
+      validatePatchOperations(repoPath, operations, declaredFiles);
+
+      const summaryParts = [
+        `Applying ${operations.length} operation(s) across ${operationPaths.length} file(s).`,
+        proposal.summary
+      ].filter((part) => part.trim().length > 0);
+
+      for (const operation of operations) {
+          const resolvedPath = resolve(repoPath, operation.path);
+          ensurePathInsideRepo(repoPath, resolvedPath);
+
+        if (operation.changeType === "create") {
+          if (fileExists(resolvedPath)) {
+            throw new Error(`Cannot create ${operation.path} because it already exists.`);
+          }
+          await mkdir(dirname(resolvedPath), { recursive: true });
+          await writeFile(resolvedPath, operation.content ?? "", "utf8");
+          continue;
+        }
+
+        if (operation.changeType === "update") {
+          if (!fileExists(resolvedPath)) {
+            throw new Error(`Cannot update ${operation.path} because it does not exist.`);
+          }
+          await writeFile(resolvedPath, operation.content ?? "", "utf8");
+          continue;
+        }
+
+        if (!fileExists(resolvedPath)) {
+          throw new Error(`Cannot delete ${operation.path} because it does not exist.`);
+        }
+        await unlink(resolvedPath);
+      }
+
+      const formattingCommands: ShellExecutionResult[] = [];
+      for (const command of params.formatCommands ?? []) {
+        if (!params.shellServer) {
+          throw new Error(`Cannot run format command "${command}" without a shell server.`);
+        }
+        formattingCommands.push(await params.shellServer.run(command));
+      }
+
+      const fileSnapshots = await Promise.all(
+        operations.map(async (operation) => {
+          if (operation.changeType === "delete") {
+            return {
+              path: operation.path,
+              content: null
+            };
+          }
+
+          const content = await readFile(resolve(repoPath, operation.path), "utf8");
+          return {
+            path: operation.path,
+            content
+          };
+        })
+      );
+
+      return {
+        applied: true,
+        changedFiles: operationPaths,
+        operations,
+        summary: summaryParts.join(" "),
+        finalDiff: await runGit(repoPath, ["diff", "--", ...operationPaths]),
+        fileSnapshots,
+        formattingCommands
+      };
+    }
+  };
+}
+
 export function createMemoryMcpServer(params: {
   readonly dataDir: string;
   readonly repoPath: string;
@@ -553,6 +684,37 @@ export function createMemoryMcpServer(params: {
       }
     }
   };
+}
+
+function validatePatchOperations(
+  repoPath: string,
+  operations: readonly FileOperation[],
+  declaredFiles: readonly string[]
+): void {
+  const seenPaths = new Set<string>();
+
+  for (const operation of operations) {
+    const resolvedPath = resolve(repoPath, operation.path);
+    ensurePathInsideRepo(repoPath, resolvedPath);
+    const normalizedPath = normalizeRepoRelative(repoPath, resolvedPath);
+
+    if (normalizedPath === ".git" || normalizedPath.startsWith(".git/")) {
+      throw new Error(`Patch proposal cannot modify reserved git metadata at ${normalizedPath}.`);
+    }
+
+    if (seenPaths.has(normalizedPath)) {
+      throw new Error(`Patch proposal contains duplicate operations for ${normalizedPath}.`);
+    }
+    seenPaths.add(normalizedPath);
+  }
+
+  for (const declaredFile of declaredFiles) {
+    if (!seenPaths.has(declaredFile)) {
+      throw new Error(
+        `Patch proposal declared ${declaredFile} in files but did not include a matching operation.`
+      );
+    }
+  }
 }
 
 async function walkFiles(root: string, currentDir: string, recursive: boolean): Promise<readonly RepoFileRecord[]> {

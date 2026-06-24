@@ -15,6 +15,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@dev-assistant/agents": "workspace:*",
     "@dev-assistant/core": "workspace:*"
   },
   "devDependencies": {

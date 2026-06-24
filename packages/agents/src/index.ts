@@ -1,6 +1,12 @@
 import { z } from "@dev-assistant/shared";
 
-export const agentRoles = ["coordinator", "coder", "reviewer", "test-runner"] as const;
+export const agentRoles = [
+  "coordinator",
+  "coder",
+  "reviewer",
+  "test-runner",
+  "coordinator-report"
+] as const;
 export const agentRoleSchema = z.enum(agentRoles);
 export type AgentRole = (typeof agentRoles)[number];
 export const advisoryAgentRoles = ["test-writer", "architecture-review", "technical-debt"] as const;
@@ -26,6 +32,32 @@ const fileChangeSchema = z.object({
 
 export type FileChange = z.infer<typeof fileChangeSchema>;
 
+const fileOperationSchema = z
+  .object({
+    path: z.string().min(1),
+    changeType: z.enum(["create", "update", "delete"]),
+    content: z.string().optional()
+  })
+  .superRefine((value, context) => {
+    if ((value.changeType === "create" || value.changeType === "update") && value.content === undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["content"],
+        message: "content is required for create and update operations"
+      });
+    }
+
+    if (value.changeType === "delete" && value.content !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["content"],
+        message: "content must be omitted for delete operations"
+      });
+    }
+  });
+
+export type FileOperation = z.infer<typeof fileOperationSchema>;
+
 export const coordinatorOutputSchema = z.object({
   summary: z.string().min(1),
   steps: z
@@ -47,6 +79,7 @@ export const coderOutputSchema = z.object({
   rationale: z.string().min(1),
   diff: z.string().min(1),
   files: z.array(fileChangeSchema).default([]),
+  operations: z.array(fileOperationSchema).default([]),
   commands: z.array(z.string().min(1)).default([])
 });
 
@@ -81,6 +114,16 @@ export const testRunnerOutputSchema = z.object({
 });
 
 export type TestRunnerOutput = z.infer<typeof testRunnerOutputSchema>;
+
+export const coordinatorReportOutputSchema = z.object({
+  summary: z.string().min(1),
+  outcome: z.enum(["completed", "blocked"]),
+  changedFiles: z.array(z.string().min(1)).default([]),
+  testsPassed: z.boolean().nullable(),
+  followUps: z.array(z.string().min(1)).default([])
+});
+
+export type CoordinatorReportOutput = z.infer<typeof coordinatorReportOutputSchema>;
 
 export const testWriterOutputSchema = z.object({
   summary: z.string().min(1),
@@ -130,6 +173,7 @@ export interface AgentOutputMap {
   coder: CoderOutput;
   reviewer: ReviewerOutput;
   "test-runner": TestRunnerOutput;
+  "coordinator-report": CoordinatorReportOutput;
 }
 
 export interface AdvisoryAgentOutputMap {
@@ -142,7 +186,8 @@ export const agentOutputSchemas = {
   coordinator: coordinatorOutputSchema,
   coder: coderOutputSchema,
   reviewer: reviewerOutputSchema,
-  "test-runner": testRunnerOutputSchema
+  "test-runner": testRunnerOutputSchema,
+  "coordinator-report": coordinatorReportOutputSchema
 } as const;
 
 export const advisoryAgentOutputSchemas = {
@@ -249,6 +294,8 @@ export function parseAgentOutput<TRole extends AgentRole>(
       return reviewerOutputSchema.parse(value) as AgentOutputMap[TRole];
     case "test-runner":
       return testRunnerOutputSchema.parse(value) as AgentOutputMap[TRole];
+    case "coordinator-report":
+      return coordinatorReportOutputSchema.parse(value) as AgentOutputMap[TRole];
   }
 }
 
@@ -304,7 +351,7 @@ export const agentOutputJsonSchemas: Record<AgentRole, JsonSchema> = {
     title: "CoderOutput",
     type: "object",
     additionalProperties: false,
-    required: ["summary", "rationale", "diff", "files", "commands"],
+    required: ["summary", "rationale", "diff", "files", "operations", "commands"],
     properties: {
       summary: { type: "string", minLength: 1 },
       rationale: { type: "string", minLength: 1 },
@@ -318,6 +365,19 @@ export const agentOutputJsonSchemas: Record<AgentRole, JsonSchema> = {
           properties: {
             path: { type: "string", minLength: 1 },
             changeType: { type: "string", enum: ["create", "update", "delete"] }
+          }
+        }
+      },
+      operations: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["path", "changeType"],
+          properties: {
+            path: { type: "string", minLength: 1 },
+            changeType: { type: "string", enum: ["create", "update", "delete"] },
+            content: { type: "string" }
           }
         }
       },
@@ -374,6 +434,28 @@ export const agentOutputJsonSchemas: Record<AgentRole, JsonSchema> = {
             stderr: { type: "string" }
           }
         }
+      }
+    }
+  },
+  "coordinator-report": {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "CoordinatorReportOutput",
+    type: "object",
+    additionalProperties: false,
+    required: ["summary", "outcome", "changedFiles", "testsPassed", "followUps"],
+    properties: {
+      summary: { type: "string", minLength: 1 },
+      outcome: { type: "string", enum: ["completed", "blocked"] },
+      changedFiles: {
+        type: "array",
+        items: { type: "string", minLength: 1 }
+      },
+      testsPassed: {
+        type: ["boolean", "null"]
+      },
+      followUps: {
+        type: "array",
+        items: { type: "string", minLength: 1 }
       }
     }
   }

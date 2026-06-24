@@ -26,7 +26,7 @@ describe("TaskCoordinator", () => {
     });
 
     expect(result.task.status).toBe("completed");
-    expect(result.usage.modelCalls).toBe(4);
+    expect(result.usage.modelCalls).toBe(5);
     expect(result.usage.shellCommands).toBe(1);
     expect(store.listEvents(result.task.id).length).toBeGreaterThan(0);
 
@@ -77,6 +77,7 @@ describe("TaskCoordinator", () => {
             rationale: "Need to edit a file",
             diff: "--- a/file.ts\n+++ b/file.ts\n",
             files: [{ path: "file.ts", changeType: "update" }],
+            operations: [{ path: "file.ts", changeType: "update", content: "next\n" }],
             commands: []
           };
         }

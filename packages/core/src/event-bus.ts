@@ -55,11 +55,7 @@ export type TaskEvent =
       {
         readonly role: AgentRole;
         readonly attempt: number;
-        readonly output:
-          | AgentOutputMap["coordinator"]
-          | AgentOutputMap["coder"]
-          | AgentOutputMap["reviewer"]
-          | AgentOutputMap["test-runner"];
+        readonly output: AgentOutputMap[AgentRole];
       }
     >
   | BaseTaskEvent<
@@ -68,6 +64,13 @@ export type TaskEvent =
         readonly role: AgentRole;
         readonly attempt: number;
         readonly issues: readonly string[];
+      }
+    >
+  | BaseTaskEvent<
+      "patch.previewed",
+      {
+        readonly summary: string;
+        readonly files: readonly string[];
       }
     >
   | BaseTaskEvent<

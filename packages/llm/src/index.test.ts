@@ -42,6 +42,13 @@ function createFakeProvider(): LocalModelProvider {
           rationale: "Use the available context",
           diff: "--- a/file.ts\n+++ b/file.ts\n@@\n+change\n",
           files: [{ path: "src/index.ts", changeType: "update" }],
+          operations: [
+            {
+              path: "src/index.ts",
+              changeType: "update",
+              content: "export const value = 2;\n"
+            }
+          ],
           commands: ["corepack pnpm test"]
         },
         {
@@ -53,6 +60,13 @@ function createFakeProvider(): LocalModelProvider {
           summary: "Tests summary",
           passed: true,
           commandResults: []
+        },
+        {
+          summary: "Final summary",
+          outcome: "completed",
+          changedFiles: ["src/index.ts"],
+          testsPassed: true,
+          followUps: []
         },
         {
           summary: "Coverage summary",
@@ -261,6 +275,13 @@ describe("createAdvisoryAgentToolkit", () => {
         rationale: "Risk noted",
         diff: "--- a/src/index.ts\n+++ b/src/index.ts\n",
         files: [{ path: "src/index.ts", changeType: "update" }],
+        operations: [
+          {
+            path: "src/index.ts",
+            changeType: "update",
+            content: "export const value = 2;\n"
+          }
+        ],
         commands: ["corepack pnpm test"]
       }
     });
@@ -278,6 +299,13 @@ describe("createAdvisoryAgentToolkit", () => {
         rationale: "Risk noted",
         diff: "--- a/src/index.ts\n+++ b/src/index.ts\n",
         files: [{ path: "src/index.ts", changeType: "update" }],
+        operations: [
+          {
+            path: "src/index.ts",
+            changeType: "update",
+            content: "export const value = 2;\n"
+          }
+        ],
         commands: ["corepack pnpm test"]
       }
     });
@@ -290,6 +318,13 @@ describe("createAdvisoryAgentToolkit", () => {
         rationale: "Risk noted",
         diff: "--- a/src/index.ts\n+++ b/src/index.ts\n",
         files: [{ path: "src/index.ts", changeType: "update" }],
+        operations: [
+          {
+            path: "src/index.ts",
+            changeType: "update",
+            content: "export const value = 2;\n"
+          }
+        ],
         commands: ["corepack pnpm test"]
       },
       reviewer: {

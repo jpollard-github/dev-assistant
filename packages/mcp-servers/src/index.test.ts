@@ -10,6 +10,7 @@ import {
   ShellCommandApprovalRequiredError,
   createGitMcpServer,
   createMemoryMcpServer,
+  createPatchMcpServer,
   createRepoMcpServer,
   createShellMcpServer,
   createTestMcpServer
@@ -228,6 +229,83 @@ describe("memory MCP server", () => {
     expect((await server.readRepositoryFacts()).framework).toBe("typescript");
     expect(await server.readDebtLog()).toContain("Fix flaky test");
     expect((await server.listRecurringFailurePatterns(5))[0]?.reason).toContain("Configured tests");
+  });
+});
+
+describe("patch MCP server", () => {
+  let repoPath = "";
+
+  beforeEach(() => {
+    ({ repoPath } = createFixtureRepo());
+  });
+
+  it("validates, applies, formats, and re-reads structured file operations", async () => {
+    const shellServer = createShellMcpServer({
+      repoPath,
+      allowlist: ["node -e \"console.log('formatted')\""]
+    });
+    const server = createPatchMcpServer({
+      repoPath,
+      shellServer,
+      formatCommands: ["node -e \"console.log('formatted')\""]
+    });
+
+    const result = await server.applyProposal({
+      summary: "Update the fixture source file",
+      diff: "--- a/src/index.ts\n+++ b/src/index.ts\n@@\n-export const value = 1;\n+export const value = 2;\n",
+      files: [{ path: "src/index.ts", changeType: "update" }],
+      operations: [
+        {
+          path: "src/index.ts",
+          changeType: "update",
+          content: "export const value = 2;\n"
+        }
+      ]
+    });
+
+    expect(result.applied).toBe(true);
+    expect(result.changedFiles).toEqual(["src/index.ts"]);
+    expect(result.finalDiff).toContain("value = 2");
+    expect(result.fileSnapshots[0]?.content).toContain("value = 2");
+    expect(result.formattingCommands[0]?.stdout).toContain("formatted");
+  });
+
+  it("rejects operations that escape the configured repository", async () => {
+    const server = createPatchMcpServer({ repoPath });
+
+    await expect(
+      server.applyProposal({
+        summary: "Try to edit outside the repo",
+        diff: "",
+        files: [{ path: "../outside.ts", changeType: "update" }],
+        operations: [
+          {
+            path: "../outside.ts",
+            changeType: "update",
+            content: "nope\n"
+          }
+        ]
+      })
+    ).rejects.toThrow(/outside the configured repository/i);
+  });
+
+  it("rejects attempts to modify git metadata inside the repository", async () => {
+    const server = createPatchMcpServer({ repoPath });
+
+    await expect(
+      server.applyProposal({
+        summary: "Try to edit git metadata",
+        diff: "",
+        files: [{ path: ".git/COMMIT_EDITMSG", changeType: "update" }],
+        operations: [
+          {
+            path: ".git/COMMIT_EDITMSG",
+            changeType: "update",
+            content: "bad idea\n"
+          }
+        ]
+      })
+    ).rejects.toThrow(/reserved git metadata/i);
   });
 });
 

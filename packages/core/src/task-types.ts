@@ -1,4 +1,4 @@
-import type { AgentRole, AgentOutputMap, CoderOutput } from "@dev-assistant/agents";
+import type { AgentRole, AgentOutputMap, CoderOutput, FileOperation } from "@dev-assistant/agents";
 import type { ApprovalPolicy, AssistantConfig } from "@dev-assistant/shared";
 
 export type TaskStatus =
@@ -29,7 +29,9 @@ export interface TaskRequest {
   readonly title?: string;
   readonly prompt: string;
   readonly budget?: Partial<TaskBudget>;
-  readonly config?: Pick<AssistantConfig, "allowedShellCommands" | "approvalPolicy" | "testCommands">;
+  readonly config?: Partial<
+    Pick<AssistantConfig, "allowedShellCommands" | "approvalPolicy" | "formatCommands" | "testCommands">
+  >;
 }
 
 export interface ShellCommandResult {
@@ -64,6 +66,13 @@ export interface PatchApplyResult {
   readonly applied: boolean;
   readonly changedFiles: readonly string[];
   readonly summary: string;
+  readonly operations: readonly FileOperation[];
+  readonly finalDiff: string;
+  readonly fileSnapshots: readonly {
+    readonly path: string;
+    readonly content: string | null;
+  }[];
+  readonly formattingCommands: readonly ShellCommandResult[];
 }
 
 export interface ApprovalRequest {
@@ -101,6 +110,17 @@ export interface AgentInvocationMap {
     readonly taskId: string;
     readonly prompt: string;
     readonly commands: readonly ShellCommandResult[];
+  };
+  readonly "coordinator-report": {
+    readonly taskId: string;
+    readonly prompt: string;
+    readonly plan: AgentOutputMap["coordinator"];
+    readonly proposal: CoderOutput;
+    readonly patchResult: PatchApplyResult;
+    readonly reviewer: AgentOutputMap["reviewer"];
+    readonly testReport: AgentOutputMap["test-runner"] | null;
+    readonly outcome: "completed" | "blocked";
+    readonly blockerReason?: string;
   };
 }
 

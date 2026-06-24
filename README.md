@@ -4,7 +4,7 @@ Dev Assistant is a local-first multi-agent development assistant. The goal is to
 
 ## Current Status
 
-This repository is in Phase 4: agent roles. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted fallback support for hybrid mode, local repo/git/shell/test/memory capability servers, and capability-backed advisory outputs for test writing, architecture review, and technical debt tracking.
+This repository is in Phase 5: patch workflow. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted fallback support for hybrid mode, local repo/git/shell/test/memory capability servers, capability-backed advisory outputs for test writing, architecture review, and technical debt tracking, plus a real structured patch-application path with validation and final task reporting.
 
 Roadmap, phase progress, milestones, MVP definition of done, and project decisions now live in [TODO.md](/Users/jasonp/repos/dev-assistant/TODO.md).
 
@@ -16,7 +16,7 @@ Roadmap, phase progress, milestones, MVP definition of done, and project decisio
 - File edits and risky commands should require human approval.
 - Logs are structured so agent actions can be audited.
 - Local state lives in `.dev-assistant/`, which is ignored except for a placeholder file.
-- Phase 4 uses a real Ollama-backed model adapter, a real allowlisted shell/test execution path, and capability-backed role prompts. Patch application is still a safe no-op until the patch workflow phase lands.
+- Phase 5 uses a real Ollama-backed model adapter, a real allowlisted shell/test execution path, capability-backed role prompts, and a controlled patch workflow that applies structured file operations inside the configured repo only.
 
 ## Workspace Layout
 
@@ -119,6 +119,7 @@ Create `dev-assistant.config.json` at the repository root when you want to overr
     "name": "qwen2.5-coder:7b"
   },
   "allowedShellCommands": ["pnpm test", "pnpm typecheck"],
+  "formatCommands": ["pnpm format -- src/index.ts"],
   "testCommands": ["pnpm test"],
   "approvalPolicy": "on-risky-action",
   "dataDir": ".dev-assistant",
@@ -140,6 +141,7 @@ Optional hybrid fallback example:
     "apiKeyEnvVar": "OPENAI_API_KEY"
   },
   "allowedShellCommands": [],
+  "formatCommands": [],
   "testCommands": [],
   "approvalPolicy": "never",
   "dataDir": ".dev-assistant",
@@ -161,8 +163,11 @@ corepack pnpm build
 ## Current Caveats
 
 - `dev-assistant run` now uses the configured Ollama model for structured agent outputs, and it can optionally fall back to a hosted Chat Completions compatible endpoint in `hybrid` mode.
+- Structured coder outputs now drive a real patch workflow with repo-bound validation, optional format commands, reviewer inspection of the final diff, and a final coordinator report.
 - Configured allowlisted test commands now run through the real shell/test path.
 - Advisory outputs now include test-writing recommendations, architecture review recommendations, and automatic technical debt entries written to `.dev-assistant/debt.md`.
-- The patch applier is still a no-op.
+- Reviewer findings are still inconsistent about file-and-line references on local models.
+- The Test Writer is still advisory only; it recommends tests but does not apply them yet.
+- Technical debt logging is still noisy and needs deduplication before it is MVP-done.
 - Hosted fallback support is implemented and unit-tested, but it was not live-validated here because no hosted credentials were configured in this repo.
 - A blocked task is currently reported in the JSON result, but the CLI does not yet turn that into a non-zero process exit code.

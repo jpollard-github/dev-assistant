@@ -10,6 +10,7 @@ import {
   advisoryAgentOutputJsonSchemas,
   advisoryAgentOutputSchemas,
   coordinatorOutputSchema,
+  coordinatorReportOutputSchema,
   coderOutputSchema,
   reviewerOutputSchema,
   testWriterOutputSchema,
@@ -395,6 +396,18 @@ export function createLocalAgentHandlers(options: LocalAgentOptions): AgentHandl
           ? {}
           : { timeoutMs: timeouts["test-runner"] })
       });
+    },
+    async "coordinator-report"(input) {
+      return generateStructuredAgentOutput({
+        provider,
+        role: "coordinator-report",
+        schema: agentOutputJsonSchemas["coordinator-report"],
+        validator: (value) => coordinatorReportOutputSchema.parse(value),
+        prompt: renderCoordinatorReportPrompt(input, provider.capabilities),
+        ...(timeouts?.["coordinator-report"] === undefined
+          ? {}
+          : { timeoutMs: timeouts["coordinator-report"] })
+      });
     }
   };
 }
@@ -490,6 +503,18 @@ export function createCapabilityBackedAgentHandlers(
         ...(timeouts?.["test-runner"] === undefined
           ? {}
           : { timeoutMs: timeouts["test-runner"] })
+      });
+    },
+    async "coordinator-report"(input) {
+      return generateStructuredAgentOutput({
+        provider,
+        role: "coordinator-report",
+        schema: agentOutputJsonSchemas["coordinator-report"],
+        validator: (value) => coordinatorReportOutputSchema.parse(value),
+        prompt: renderCapabilityAwareCoordinatorReportPrompt(input, provider.capabilities),
+        ...(timeouts?.["coordinator-report"] === undefined
+          ? {}
+          : { timeoutMs: timeouts["coordinator-report"] })
       });
     }
   };
@@ -985,6 +1010,9 @@ ${JSON.stringify(capabilities, null, 2)}
 
 Requirements:
 - Name likely files when possible.
+- Add operations for every file you expect to change.
+- For create and update operations, include the full intended file content in content.
+- For delete operations, omit content.
 - Explain risk and expected tests in the rationale.
 - Keep commands narrow and relevant.
 - If context is insufficient, say so clearly in rationale rather than inventing details.`
@@ -1026,7 +1054,7 @@ ${JSON.stringify(capabilities, null, 2)}
 Requirements:
 - Review only the proposed change and its likely impact.
 - Findings must be concrete and action-oriented.
-- Include filePath and line when the proposal supports it.
+- Include filePath and line when the final diff supports it.
 - Approve only if the proposal seems safe enough for the next step.`
   };
 }
@@ -1067,6 +1095,47 @@ Requirements:
 - Preserve the observed command results exactly.
 - Mark passed true only if every command succeeded.
 - Mention the most relevant parsed summary in the top-level summary.`
+  };
+}
+
+function renderCapabilityAwareCoordinatorReportPrompt(
+  input: AgentInvocationMap["coordinator-report"],
+  capabilities: ModelCapabilityMetadata
+): { readonly systemPrompt: string; readonly userPrompt: string } {
+  return {
+    systemPrompt:
+      "You are the coordinator for a local-first development assistant. Produce the final task report for the completed workflow using the actual patch, review, and test results. Reply only with JSON matching the schema.",
+    userPrompt: `User task:
+${input.prompt}
+
+Original plan:
+${JSON.stringify(input.plan, null, 2)}
+
+Patch proposal:
+${JSON.stringify(input.proposal, null, 2)}
+
+Applied patch result:
+${JSON.stringify(input.patchResult, null, 2)}
+
+Reviewer result:
+${JSON.stringify(input.reviewer, null, 2)}
+
+Test result:
+${JSON.stringify(input.testReport, null, 2)}
+
+Outcome:
+${input.outcome}
+
+Blocker reason:
+${input.blockerReason ?? "(none)"}
+
+Model capabilities:
+${JSON.stringify(capabilities, null, 2)}
+
+Requirements:
+- Summarize only what really happened.
+- Keep followUps short and actionable.
+- Use testsPassed null when no tests were run.`
   };
 }
 
@@ -1297,6 +1366,9 @@ ${JSON.stringify(capabilities, null, 2)}
 Requirements:
 - Keep the proposal small and specific.
 - Use files only when you can name likely targets from the task.
+- Add operations for every file you expect to change.
+- For create and update operations, include the full intended file content in content.
+- For delete operations, omit content.
 - Use commands only when they are directly relevant.
 - Diff can be a proposed unified diff snippet or a placeholder patch plan if context is insufficient.`
   };
@@ -1330,7 +1402,7 @@ ${JSON.stringify(capabilities, null, 2)}
 Requirements:
 - Approve only if the proposal seems consistent with the task.
 - Findings should be concrete and concise.
-- Include filePath and line when the proposal contains enough detail to support it.`
+- Include filePath and line when the final diff contains enough detail to support it.`
   };
 }
 
@@ -1357,5 +1429,46 @@ Requirements:
 - Mark passed true only if every command succeeded.
 - Summarize failures plainly if any command failed.
 - Preserve the observed command results.`
+  };
+}
+
+function renderCoordinatorReportPrompt(
+  input: AgentInvocationMap["coordinator-report"],
+  capabilities: ModelCapabilityMetadata
+): {
+  readonly systemPrompt: string;
+  readonly userPrompt: string;
+} {
+  return {
+    systemPrompt:
+      "You are the coordinator for a local-first development assistant. Produce the final task report after review and testing. Reply only with JSON matching the schema.",
+    userPrompt: `User task:
+${input.prompt}
+
+Coordinator plan:
+${JSON.stringify(input.plan, null, 2)}
+
+Patch result:
+${JSON.stringify(input.patchResult, null, 2)}
+
+Reviewer result:
+${JSON.stringify(input.reviewer, null, 2)}
+
+Test result:
+${JSON.stringify(input.testReport, null, 2)}
+
+Outcome:
+${input.outcome}
+
+Blocker reason:
+${input.blockerReason ?? "(none)"}
+
+Model capabilities:
+${JSON.stringify(capabilities, null, 2)}
+
+Requirements:
+- Summarize the actual outcome, not the intended one.
+- Keep followUps concise and concrete.
+- Use testsPassed null when no tests were run.`
   };
 }

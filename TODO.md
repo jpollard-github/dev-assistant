@@ -10,7 +10,7 @@ This file is the planning source of truth for the repository.
 
 ## Current Status
 
-Current phase: Phase 4 in progress.
+Current phase: Phase 5 complete, with Phase 4 follow-up items still open.
 
 What is implemented today:
 
@@ -22,12 +22,13 @@ What is implemented today:
 - Phase 3 now includes repo, git, shell, test, and memory capability servers, agent permission profiles, and integration tests for every server.
 - The CLI task flow now uses the real allowlisted shell execution path for configured test commands.
 - Phase 4 now includes capability-backed coordinator/coder/reviewer/test-runner prompts, standalone advisory roles for test writing, architecture review, and technical debt tracking, and automatic debt log recording to `.dev-assistant/debt.md`.
-- Patch application is still a no-op, so the assistant is not yet MVP-useful.
+- Phase 5 now includes structured file operations from the coder, controlled patch application, repo-bound patch validation, optional formatting commands, final-diff review, and a coordinator final task report.
+- The Phase 5 path was live-validated locally against a throwaway Git fixture using Ollama and `qwen2.5-coder:7b`.
 
 What that means for MVP:
 
-- The project is a strong scaffold, but not yet at the "real bug-fix assistant" stage.
-- The biggest remaining unlocks are real patch application and real test-writing/edit application on top of the new role behavior.
+- The project has crossed into an early MVP-capable state for very small, low-risk tasks.
+- The biggest remaining unlocks are better reviewer precision, real test-writing/edit application, and reducing technical-debt noise.
 
 ## Implemented Decisions
 
@@ -52,6 +53,13 @@ What that means for MVP:
 
 - Confirm whether `qwen2.5-coder:7b` should remain the default example model or be replaced with another local model.
 - Decide whether the first real patch-application path should be unified diff based, structured file-operation based, or support both from the start.
+
+## Dependency Map
+
+- Remaining Phase 4 reviewer precision work depends mostly on Phase 8 evals, with some help from Phase 6 CLI/reporting polish.
+- Remaining Phase 4 Test Writer implementation depends mostly on Phase 6 workflow support and Phase 8 quality evaluation.
+- Remaining technical debt signal-to-noise work depends mostly on Phase 10 debt schema, deduplication, and confirmation flows.
+- The Post-Phase 4 dynamic role selection follow-up depends mostly on Phase 8 task traces/evals, with Phase 11 role-specific routing likely shaping the final design.
 
 ## Product Thesis
 
@@ -232,10 +240,12 @@ This phase replaces the current stubbed shell/test execution path with real tool
   - [x] reviews only the actual diff
   - [x] prioritizes correctness and regressions
   - [ ] emits findings with file and line references
+  Note: this is expected to improve further through Phase 6 CLI/reporting polish and Phase 8 eval coverage for review quality.
 - [ ] Test Writer agent:
   - [x] identifies missing coverage
   - [ ] adds focused tests
   - [x] avoids broad snapshot churn
+  Note: this likely closes through Phase 6 workflow support plus Phase 8 evals for test-generation quality.
 - [x] Architecture Review agent:
   - [x] checks boundaries, coupling, dependency direction, and migration risk
   - [x] produces recommendations, not automatic rewrites
@@ -243,25 +253,27 @@ This phase replaces the current stubbed shell/test execution path with real tool
   - [x] records debt items in `.dev-assistant/debt.md` or SQLite
   - [x] links each item to files and task history
   - [x] distinguishes must-fix, should-fix, and nice-to-have
+  Note: debt quality and noise control are expected to improve substantially in Phase 10.
 
 ## Post-Phase 4 Follow-Up
 
 - [ ] Introduce dynamic role selection only after the fixed-sequence baseline has enough task traces to justify which roles should become optional.
+  Note: this depends mostly on Phase 8 evaluation data and traces, with Phase 11 role-specific routing likely informing the final design.
 
 ## Phase 5: Patch Workflow
 
 This phase replaces the current no-op patch applier with a real, controlled patch workflow.
 
-- [ ] Represent proposed edits as unified diffs or structured file operations.
-- [ ] Validate patches before applying.
-- [ ] Reject patches that touch files outside the configured repo.
-- [ ] Show a summary before applying changes.
-- [ ] Apply patches through a controlled patch service.
-- [ ] Re-read changed files after patching.
-- [ ] Run formatting when configured.
-- [ ] Run tests after implementation and test edits.
-- [ ] Ask Reviewer to inspect the final diff.
-- [ ] Require the Coordinator to produce a final task report.
+- [x] Represent proposed edits as unified diffs or structured file operations.
+- [x] Validate patches before applying.
+- [x] Reject patches that touch files outside the configured repo.
+- [x] Show a summary before applying changes.
+- [x] Apply patches through a controlled patch service.
+- [x] Re-read changed files after patching.
+- [x] Run formatting when configured.
+- [x] Run tests after implementation and test edits.
+- [x] Ask Reviewer to inspect the final diff.
+- [x] Require the Coordinator to produce a final task report.
 
 ## Phase 6: CLI Experience
 
@@ -507,7 +519,7 @@ Do not build the VS Code extension until this workflow feels useful from the CLI
 
 Add:
 
-- [ ] Test Writer agent.
+- [x] Test Writer agent.
 - [x] Technical Debt agent.
 - [x] SQLite event history.
 - [x] Debt log.
