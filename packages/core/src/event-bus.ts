@@ -1,6 +1,7 @@
 import type { AgentRole, AgentOutputMap } from "@dev-assistant/agents";
 
 import type {
+  AgentExecutionMetadata,
   ApprovalDecision,
   ApprovalRequest,
   PatchApplyResult,
@@ -42,6 +43,14 @@ export type TaskEvent =
       }
     >
   | BaseTaskEvent<
+      "agent.prompt-snapshot",
+      {
+        readonly role: AgentRole;
+        readonly attempt: number;
+        readonly snapshot: string;
+      }
+    >
+  | BaseTaskEvent<
       "agent.completed",
       {
         readonly role: AgentRole;
@@ -77,8 +86,14 @@ export type TaskEvent =
   | BaseTaskEvent<
       "tool.result",
       {
-        readonly tool: "patch-applier" | "shell-runner";
-        readonly result: PatchApplyResult | ShellCommandResult;
+        readonly tool: "patch-applier" | "shell-runner" | "llm-provider";
+        readonly result:
+          | PatchApplyResult
+          | ShellCommandResult
+          | ({
+              readonly role: AgentRole;
+            } & Required<Pick<AgentExecutionMetadata, "provider" | "model" | "durationMs">> &
+              Pick<AgentExecutionMetadata, "tokenUsage" | "finishReason">);
       }
     >
   | BaseTaskEvent<

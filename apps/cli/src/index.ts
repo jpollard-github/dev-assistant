@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 import { join } from "node:path";
 
-import { TaskCoordinator, SqliteTaskEventStore, createDemoAgentHandlers } from "@dev-assistant/core";
+import { TaskCoordinator, SqliteTaskEventStore } from "@dev-assistant/core";
+import {
+  createFallbackProvider,
+  createHostedModelProvider,
+  createLocalAgentHandlers,
+  createOllamaProvider
+} from "@dev-assistant/llm";
 import {
   ensureDataDir,
   loadAssistantConfig,
@@ -63,10 +69,13 @@ async function runTask(args: string[]): Promise<void> {
 
   const config = loadAssistantConfig();
   const dataDir = ensureDataDir(config);
-  const store = new SqliteTaskEventStore(join(dataDir, "phase-1.sqlite"));
+  const store = new SqliteTaskEventStore(join(dataDir, "tasks.sqlite"));
+  const agents = createLocalAgentHandlers({
+    provider: resolveModelProvider(config)
+  });
   const coordinator = new TaskCoordinator({
     store,
-    agents: createDemoAgentHandlers(),
+    agents,
     approvalDecider: {
       decide(request) {
         if (config.approvalPolicy === "never") {
@@ -124,6 +133,56 @@ async function runTask(args: string[]): Promise<void> {
   );
 
   store.close();
+}
+
+function resolveModelProvider(config: ReturnType<typeof loadAssistantConfig>) {
+  if (config.model.provider === "ollama") {
+    const ollamaProvider = createOllamaProvider({
+      model: config.model.name
+    });
+
+    if (config.mode === "hybrid" && config.hosted) {
+      return createFallbackProvider(
+        ollamaProvider,
+        createHostedModelProvider({
+          model: config.model.name,
+          baseUrl: config.hosted.baseUrl,
+          apiKey: requireHostedApiKey(config.hosted.apiKeyEnvVar),
+          providerName: "hosted-fallback"
+        })
+      );
+    }
+
+    return ollamaProvider;
+  }
+
+  if (config.model.provider === "hosted") {
+    if (!config.hosted) {
+      throw new Error(
+        'Hosted provider requires a "hosted" config block with "baseUrl" and "apiKeyEnvVar".'
+      );
+    }
+
+    return createHostedModelProvider({
+      model: config.model.name,
+      baseUrl: config.hosted.baseUrl,
+      apiKey: requireHostedApiKey(config.hosted.apiKeyEnvVar),
+      providerName: "hosted"
+    });
+  }
+
+  throw new Error(
+    `Model provider "${config.model.provider}" is not implemented yet. Phase 2 currently supports ollama and hosted fallback.`
+  );
+}
+
+function requireHostedApiKey(envVarName: string): string {
+  const apiKey = process.env[envVarName];
+  if (!apiKey) {
+    throw new Error(`Hosted provider API key is missing. Set ${envVarName} in your environment.`);
+  }
+
+  return apiKey;
 }
 
 const args = process.argv.slice(2).filter((arg) => arg !== "--");

@@ -40,6 +40,26 @@ export interface ShellCommandResult {
   readonly durationMs: number;
 }
 
+export interface ModelTokenUsage {
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly totalTokens?: number;
+}
+
+export interface AgentExecutionMetadata {
+  readonly promptSnapshot?: string;
+  readonly provider?: string;
+  readonly model?: string;
+  readonly durationMs?: number;
+  readonly tokenUsage?: ModelTokenUsage;
+  readonly finishReason?: string;
+}
+
+export interface AgentExecutionEnvelope {
+  readonly output: unknown;
+  readonly metadata?: AgentExecutionMetadata;
+}
+
 export interface PatchApplyResult {
   readonly applied: boolean;
   readonly changedFiles: readonly string[];
@@ -86,7 +106,7 @@ export interface AgentInvocationMap {
 
 export type AgentHandler<TRole extends AgentRole> = (
   input: AgentInvocationMap[TRole]
-) => Promise<unknown> | unknown;
+) => Promise<unknown | AgentExecutionEnvelope> | unknown | AgentExecutionEnvelope;
 
 export type AgentHandlers = {
   readonly [TRole in AgentRole]: AgentHandler<TRole>;

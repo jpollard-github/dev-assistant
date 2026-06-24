@@ -1,0 +1,12 @@
+{
+  "repoPath": ".",
+  "model": {
+    "provider": "ollama",
+    "name": "qwen2.5-coder:7b"
+  },
+  "allowedShellCommands": [],
+  "testCommands": [],
+  "approvalPolicy": "never",
+  "dataDir": ".dev-assistant",
+  "mode": "local-only"
+}

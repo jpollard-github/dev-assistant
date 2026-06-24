@@ -38,6 +38,9 @@ importers:
       '@dev-assistant/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@dev-assistant/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
       '@dev-assistant/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -100,6 +103,13 @@ importers:
         version: 3.2.6(@types/node@24.13.2)(tsx@4.22.4)
 
   packages/llm:
+    dependencies:
+      '@dev-assistant/agents':
+        specifier: workspace:*
+        version: link:../agents
+      '@dev-assistant/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       typescript:
         specifier: ^5.8.3

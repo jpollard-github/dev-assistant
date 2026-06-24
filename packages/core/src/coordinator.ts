@@ -12,6 +12,7 @@ import { ZodError } from "@dev-assistant/shared";
 import { createTaskEventBus, type TaskEvent, type TaskEventBus } from "./event-bus.js";
 import type { TaskEventStore } from "./event-store.js";
 import type {
+  AgentExecutionEnvelope,
   AgentHandlers,
   AgentInvocationMap,
   ApprovalDecision,
@@ -353,8 +354,49 @@ export class TaskCoordinator {
 
       const handler = this.agents[role] as (
         input: AgentInvocationMap[TRole]
-      ) => Promise<unknown> | unknown;
-      const rawOutput = await handler(input as AgentInvocationMap[TRole]);
+      ) => Promise<unknown | AgentExecutionEnvelope> | unknown | AgentExecutionEnvelope;
+      const rawResult = await handler(input as AgentInvocationMap[TRole]);
+      const { output: rawOutput, metadata } = this.normalizeAgentResult(rawResult);
+
+      await this.recordEvent({
+        taskId: input.taskId,
+        type: "agent.prompt-snapshot",
+        payload: {
+          role,
+          attempt,
+          snapshot: metadata?.promptSnapshot ?? JSON.stringify(input, null, 2)
+        }
+      });
+
+      if (metadata?.provider && metadata.model && typeof metadata.durationMs === "number") {
+        const llmResult: {
+          readonly role: AgentRole;
+          readonly provider: string;
+          readonly model: string;
+          readonly durationMs: number;
+          readonly tokenUsage?: {
+            readonly inputTokens?: number;
+            readonly outputTokens?: number;
+            readonly totalTokens?: number;
+          };
+          readonly finishReason?: string;
+        } = {
+          role,
+          provider: metadata.provider,
+          model: metadata.model,
+          durationMs: metadata.durationMs
+        };
+
+        if (metadata.tokenUsage) {
+          Object.assign(llmResult, { tokenUsage: metadata.tokenUsage });
+        }
+
+        if (metadata.finishReason) {
+          Object.assign(llmResult, { finishReason: metadata.finishReason });
+        }
+
+        await this.recordToolResult(input.taskId, "llm-provider", llmResult);
+      }
 
       try {
         const parsed = parseAgentOutput(role, rawOutput);
@@ -431,8 +473,22 @@ export class TaskCoordinator {
 
   private async recordToolResult(
     taskId: string,
-    tool: "patch-applier" | "shell-runner",
-    result: PatchApplyResult | Awaited<ReturnType<ShellRunner["run"]>>
+    tool: "patch-applier" | "shell-runner" | "llm-provider",
+    result:
+      | PatchApplyResult
+      | Awaited<ReturnType<ShellRunner["run"]>>
+      | {
+          readonly role: AgentRole;
+          readonly provider: string;
+          readonly model: string;
+          readonly durationMs: number;
+          readonly tokenUsage?: {
+            readonly inputTokens?: number;
+            readonly outputTokens?: number;
+            readonly totalTokens?: number;
+          };
+          readonly finishReason?: string;
+        }
   ): Promise<void> {
     await this.recordEvent({
       taskId,
@@ -542,6 +598,28 @@ export class TaskCoordinator {
     } as TaskEvent;
     this.store.append(event);
     await this.bus.publish(event);
+  }
+
+  private normalizeAgentResult(value: unknown | AgentExecutionEnvelope): {
+    readonly output: unknown;
+    readonly metadata?: AgentExecutionEnvelope["metadata"];
+  } {
+    if (this.isAgentExecutionEnvelope(value)) {
+      return {
+        output: value.output,
+        metadata: value.metadata
+      };
+    }
+
+    return { output: value };
+  }
+
+  private isAgentExecutionEnvelope(value: unknown): value is AgentExecutionEnvelope {
+    if (typeof value !== "object" || value === null || !("output" in value)) {
+      return false;
+    }
+
+    return true;
   }
 }
 

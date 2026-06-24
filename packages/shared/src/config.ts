@@ -16,6 +16,12 @@ export const assistantConfigSchema = z.object({
       name: z.string().min(1).default("qwen2.5-coder:7b")
     })
     .default({ provider: "ollama", name: "qwen2.5-coder:7b" }),
+  hosted: z
+    .object({
+      baseUrl: z.string().min(1),
+      apiKeyEnvVar: z.string().min(1).default("OPENAI_API_KEY")
+    })
+    .optional(),
   allowedShellCommands: z.array(z.string().min(1)).default([]),
   testCommands: z.array(z.string().min(1)).default([]),
   approvalPolicy: approvalPolicySchema.default("on-risky-action"),

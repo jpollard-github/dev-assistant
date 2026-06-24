@@ -1,5 +1,55 @@
 # Multi-Agent Development Assistant TODO
 
+## Source Of Truth
+
+This file is the planning source of truth for the repository.
+
+- Use this file for roadmap, phase checklists, milestones, MVP definition of done, key decisions, status notes, and open questions.
+- Keep `README.md` focused on project overview, setup, usage, and current caveats.
+- Do not create a separate progress tracker unless there is a strong reason and it is linked here.
+
+## Current Status
+
+Current phase: Phase 2 complete, Phase 3 next.
+
+What is implemented today:
+
+- Phase 0 foundation is in place.
+- The repo has a deterministic orchestrator flow and a minimal CLI `run` command.
+- Task lifecycle events, SQLite-backed event history, structured logging, approval checkpoints, agent output schemas, budget enforcement, and prompt snapshots are implemented.
+- Phase 2 now includes a provider interface, an Ollama backend, model capability metadata, optional hosted fallback support, and model-backed role handlers for the fixed four-role baseline.
+- The local model path has been validated in this repo with `qwen2.5:3b` and `qwen2.5-coder:7b`.
+- Patch application is still a no-op and shell command execution is still stubbed, so the assistant is not yet MVP-useful.
+
+What that means for MVP:
+
+- The project is a strong scaffold, but not yet at the "real bug-fix assistant" stage.
+- The biggest remaining unlocks are real repo/git/shell/test tools and real patch application.
+
+## Implemented Decisions
+
+- Use `pnpm` workspaces for the monorepo.
+- Use a CLI-first architecture before building the VS Code extension.
+- Use TypeScript strict mode across all packages.
+- Use `apps/*` and `packages/*` workspace boundaries.
+- Include a placeholder VS Code extension package now, but keep implementation deferred until the CLI orchestration is useful.
+- Keep the default runtime mode `local-only`.
+- Use Ollama as the default local model provider in examples because it is simple to run locally.
+- Use `qwen2.5-coder:7b` as the example default model name; this is configurable and not a hard requirement.
+- Use `.dev-assistant/` as the local state directory convention.
+- Store only a placeholder file in `.dev-assistant/`; generated state remains ignored by git.
+- Start with a lightweight in-repo structured logger instead of adding a runtime logging dependency.
+- Validate config shape in shared TypeScript code before later wiring in richer agent workflows.
+- Run the CLI from built JavaScript for now because the `tsx` development runner opens an IPC pipe that is restricted in this sandboxed environment.
+- Keep task budget defaults in orchestration code for now, but design the API so later phases can add optional config overrides.
+- Keep the fixed coordinator -> coder -> reviewer -> test-runner sequence through the first real-model integration baseline, then revisit dynamic role selection later.
+
+## Open Questions
+
+- Confirm whether `qwen2.5-coder:7b` should remain the default example model or be replaced with another local model.
+- Confirm whether the first MCP implementation should use separate servers per capability or one development server with separate tools.
+- Decide whether the first real patch-application path should be unified diff based, structured file-operation based, or support both from the start.
+
 ## Product Thesis
 
 Build a local-first development assistant that coordinates specialized agents for coding, review, testing, architecture feedback, and technical debt tracking. The system should feel like a senior engineering team embedded in VS Code, with clear handoffs, auditable decisions, and strong guardrails around file edits and tool execution.
@@ -114,27 +164,29 @@ Decision: Keep the fixed four-role sequence through Phase 2, then introduce dyna
 
 ## Phase 2: Local LLM Adapter
 
-- [ ] Implement a provider interface:
-  - [ ] `generateText`
-  - [ ] `generateStructured`
-  - [ ] optional streaming
-  - [ ] token accounting when available
-- [ ] Add one local backend first, probably Ollama for ease of setup.
-- [ ] Add model capability metadata:
-  - [ ] context window
-  - [ ] tool-use support
-  - [ ] structured-output reliability
-  - [ ] recommended roles
-- [ ] Add timeouts and cancellation.
-- [ ] Add prompt snapshots to task logs.
-- [ ] Design the provider/orchestration API so task budgets can gain optional config overrides later without moving default limits out of orchestration code yet.
-- [ ] Keep the fixed coordinator -> coder -> reviewer -> test-runner sequence as the baseline flow while integrating real model adapters.
-- [ ] Add optional hosted fallback support only after local workflows work.
-- [ ] Test with at least two model sizes:
-  - [ ] small fast model for classification and summaries
-  - [ ] stronger code model for implementation and review
+- [x] Implement a provider interface:
+  - [x] `generateText`
+  - [x] `generateStructured`
+  - [x] optional streaming
+  - [x] token accounting when available
+- [x] Add one local backend first, probably Ollama for ease of setup.
+- [x] Add model capability metadata:
+  - [x] context window
+  - [x] tool-use support
+  - [x] structured-output reliability
+  - [x] recommended roles
+- [x] Add timeouts and cancellation.
+- [x] Add prompt snapshots to task logs.
+- [x] Design the provider/orchestration API so task budgets can gain optional config overrides later without moving default limits out of orchestration code yet.
+- [x] Keep the fixed coordinator -> coder -> reviewer -> test-runner sequence as the baseline flow while integrating real model adapters.
+- [x] Add optional hosted fallback support only after local workflows work.
+- [x] Test with at least two model sizes:
+  - [x] small fast model for classification and summaries
+  - [x] stronger code model for implementation and review
 
 ## Phase 3: MCP Servers
+
+This phase replaces the current stubbed shell/test execution path with real tool-backed capability servers.
 
 - [ ] Build a repo MCP server:
   - [ ] list files
@@ -194,6 +246,8 @@ Decision: Keep the fixed four-role sequence through Phase 2, then introduce dyna
 - [ ] Introduce dynamic role selection only after the fixed-sequence baseline has enough task traces to justify which roles should become optional.
 
 ## Phase 5: Patch Workflow
+
+This phase replaces the current no-op patch applier with a real, controlled patch workflow.
 
 - [ ] Represent proposed edits as unified diffs or structured file operations.
 - [ ] Validate patches before applying.

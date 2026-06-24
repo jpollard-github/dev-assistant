@@ -106,4 +106,59 @@ describe("TaskCoordinator", () => {
 
     store.close();
   });
+
+  it("records prompt snapshots and llm metadata for wrapped agent outputs", async () => {
+    const dbPath = join(mkdtempSync(join(tmpdir(), "dev-assistant-core-")), "tasks.sqlite");
+    const store = new SqliteTaskEventStore(dbPath);
+    const coordinator = new TaskCoordinator({
+      store,
+      agents: {
+        ...createDemoAgentHandlers(),
+        coordinator() {
+          return {
+            output: {
+              summary: "Plan task",
+              steps: [{ id: "plan", description: "Plan it", kind: "analysis" }],
+              requiresTests: true
+            },
+            metadata: {
+              promptSnapshot: "SYSTEM:\nCoordinator prompt",
+              provider: "ollama",
+              model: "qwen2.5-coder:7b",
+              durationMs: 42,
+              tokenUsage: {
+                inputTokens: 12,
+                outputTokens: 18,
+                totalTokens: 30
+              }
+            }
+          };
+        }
+      }
+    });
+
+    const result = await coordinator.runTask({
+      prompt: "Record prompt snapshots",
+      config: {
+        approvalPolicy: "never",
+        allowedShellCommands: [],
+        testCommands: []
+      }
+    });
+
+    expect(result.task.status).toBe("completed");
+    const events = store.listEvents(result.task.id);
+    expect(events.some((event) => event.type === "agent.prompt-snapshot")).toBe(true);
+    expect(
+      events.some(
+        (event) =>
+          event.type === "tool.result" &&
+          event.payload.tool === "llm-provider" &&
+          "provider" in event.payload.result &&
+          event.payload.result.provider === "ollama"
+      )
+    ).toBe(true);
+
+    store.close();
+  });
 });
