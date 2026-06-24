@@ -4,7 +4,7 @@ Dev Assistant is a local-first multi-agent development assistant. The goal is to
 
 ## Current Status
 
-This repository is in Phase 6: CLI experience. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted fallback support for hybrid mode, local repo/git/shell/test/memory capability servers, capability-backed advisory outputs for test writing, architecture review, and technical debt tracking, a real structured patch-application path with validation and final task reporting, and a fuller CLI with review, history, debt, doctor, dry-run, and JSON output support.
+This repository is in Phase 8: evaluation system. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted fallback support for hybrid mode, local repo/git/shell/test/memory capability servers, capability-backed advisory outputs for test writing, architecture review, and technical debt tracking, a real structured patch-application path with validation and final task reporting, a VS Code extension with task timeline and approvals, and an eval package with benchmark fixtures, scoring, regression history, and structured-output golden cases.
 
 Roadmap, phase progress, milestones, MVP definition of done, and project decisions now live in [TODO.md](/Users/jasonp/repos/dev-assistant/TODO.md).
 
@@ -21,14 +21,14 @@ Roadmap, phase progress, milestones, MVP definition of done, and project decisio
 ## Workspace Layout
 
 - `apps/cli`: command-line entrypoint.
-- `apps/vscode-extension`: placeholder package for the planned VS Code extension.
+- `apps/vscode-extension`: VS Code extension with task sidebar, approvals, history, and review/debt/test commands.
 - `packages/shared`: shared schemas, config loading, logging, and data directory helpers.
 - `packages/core`: task orchestration engine, event bus, budgets, approvals, and SQLite event storage.
 - `packages/agents`: role definitions and structured output schemas for coordinator, coder, reviewer, and test-runner flows.
 - `packages/mcp-servers`: local repo, git, shell, test, and memory capability servers.
 - `packages/agents`: schemas for primary and advisory agent outputs.
-- `packages/llm`: planned local and optional hosted model adapters.
-- `packages/evals`: planned evaluation fixtures and scoring helpers.
+- `packages/llm`: local and optional hosted model adapters.
+- `packages/evals`: evaluation fixtures, scoring helpers, regression tracking, and golden structured-output checks.
 
 ## Getting Started
 
@@ -202,5 +202,6 @@ corepack pnpm build
 - Reviewer findings are still inconsistent about file-and-line references on local models.
 - The Test Writer is still advisory only; it recommends tests but does not apply them yet.
 - Technical debt logging is still noisy and needs deduplication before it is MVP-done.
+- The eval package provides baseline scoring and regression tracking, but it still needs to be exercised regularly against real local model runs to tune prompt quality.
 - Hosted fallback support is implemented and unit-tested, but it was not live-validated here because no hosted credentials were configured in this repo.
 - A blocked task is currently reported in the JSON result, but the CLI still exits with code `0` unless a command-level exception is thrown.

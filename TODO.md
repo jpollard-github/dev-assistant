@@ -10,7 +10,7 @@ This file is the planning source of truth for the repository.
 
 ## Current Status
 
-Current phase: Phase 7 complete, with Phase 4 follow-up items still open.
+Current phase: Phase 8 complete, with Phase 4 follow-up items still open.
 
 What is implemented today:
 
@@ -27,11 +27,12 @@ What is implemented today:
 - Phase 6 now includes `init`, `review`, `test`, `debt list`, `debt add`, `history`, `config doctor`, interactive approvals, dry-run support, and `--json` machine-readable output.
 - The non-model CLI commands now work without requiring Ollama to be running.
 - Phase 7 now includes a functional VS Code extension package with an activity-bar sidebar, active-task timeline, native diff previews for patch approvals, modal approval controls for edits and shell commands, task cancellation, workspace trust gating, and history/test/debt/review commands surfaced in the editor.
+- Phase 8 now includes benchmark fixtures across six task categories, fixture materialization helpers, outcome scoring for the planned MVP quality gates, a multi-model eval matrix runner, regression-history persistence, and a golden structured-output suite for agent/advisory schemas.
 
 What that means for MVP:
 
 - The project has crossed into an early MVP-capable state for small, low-risk tasks in both the CLI and VS Code.
-- The biggest remaining unlocks are better reviewer precision, real test-writing/edit application, evaluation coverage, and reducing technical-debt noise.
+- The biggest remaining unlocks are better reviewer precision in live runs, real test-writing/edit application, and reducing technical-debt noise.
 
 ## Implemented Decisions
 
@@ -59,10 +60,10 @@ What that means for MVP:
 
 ## Dependency Map
 
-- Remaining Phase 4 reviewer precision work depends mostly on Phase 8 evals, with some help from Phase 6 CLI/reporting polish.
-- Remaining Phase 4 Test Writer implementation depends mostly on Phase 6 workflow support and Phase 8 quality evaluation.
+- Remaining Phase 4 reviewer precision work now has baseline eval coverage, but still needs live prompt/model tuning plus stronger file-and-line citation consistency.
+- Remaining Phase 4 Test Writer implementation now has evaluation coverage, but still needs real test-authoring/apply workflow support instead of advisory output only.
 - Remaining technical debt signal-to-noise work depends mostly on Phase 10 debt schema, deduplication, and confirmation flows.
-- The Post-Phase 4 dynamic role selection follow-up depends mostly on Phase 8 task traces/evals, with Phase 11 role-specific routing likely shaping the final design.
+- The Post-Phase 4 dynamic role selection follow-up now has evaluation fixtures and regression traces to build on, with Phase 11 role-specific routing likely shaping the final design.
 
 ## Product Thesis
 
@@ -243,12 +244,12 @@ This phase replaces the current stubbed shell/test execution path with real tool
   - [x] reviews only the actual diff
   - [x] prioritizes correctness and regressions
   - [ ] emits findings with file and line references
-  Note: this is expected to improve further through Phase 6 CLI/reporting polish and Phase 8 eval coverage for review quality.
+  Note: Phase 8 now adds baseline review-quality eval coverage, but live file-and-line citation consistency still needs prompt/model tuning.
 - [ ] Test Writer agent:
   - [x] identifies missing coverage
   - [ ] adds focused tests
   - [x] avoids broad snapshot churn
-  Note: this likely closes through Phase 6 workflow support plus Phase 8 evals for test-generation quality.
+  Note: Phase 8 now adds test-generation eval coverage, but the agent still recommends tests rather than authoring and applying them directly.
 - [x] Architecture Review agent:
   - [x] checks boundaries, coupling, dependency direction, and migration risk
   - [x] produces recommendations, not automatic rewrites
@@ -261,7 +262,7 @@ This phase replaces the current stubbed shell/test execution path with real tool
 ## Post-Phase 4 Follow-Up
 
 - [ ] Introduce dynamic role selection only after the fixed-sequence baseline has enough task traces to justify which roles should become optional.
-  Note: this depends mostly on Phase 8 evaluation data and traces, with Phase 11 role-specific routing likely informing the final design.
+  Note: Phase 8 now provides starter evaluation data and regression traces, with Phase 11 role-specific routing likely informing the final design.
 
 ## Phase 5: Patch Workflow
 
@@ -318,24 +319,24 @@ This phase replaces the current no-op patch applier with a real, controlled patc
 
 ## Phase 8: Evaluation System
 
-- [ ] Create a set of small local benchmark repos or fixtures.
-- [ ] Add task categories:
-  - [ ] bug fix
-  - [ ] feature addition
-  - [ ] refactor
-  - [ ] test generation
-  - [ ] review-only
-  - [ ] architecture critique
-- [ ] Score outcomes:
-  - [ ] builds successfully
-  - [ ] tests pass
-  - [ ] minimal changed files
-  - [ ] reviewer catches seeded bugs
-  - [ ] no forbidden file access
-  - [ ] useful final summary
-- [ ] Run evals against multiple local models.
-- [ ] Track regression results over time.
-- [ ] Add a small golden-output suite for structured responses.
+- [x] Create a set of small local benchmark repos or fixtures.
+- [x] Add task categories:
+  - [x] bug fix
+  - [x] feature addition
+  - [x] refactor
+  - [x] test generation
+  - [x] review-only
+  - [x] architecture critique
+- [x] Score outcomes:
+  - [x] builds successfully
+  - [x] tests pass
+  - [x] minimal changed files
+  - [x] reviewer catches seeded bugs
+  - [x] no forbidden file access
+  - [x] useful final summary
+- [x] Run evals against multiple local models.
+- [x] Track regression results over time.
+- [x] Add a small golden-output suite for structured responses.
 
 ## Phase 9: Security And Safety
 
@@ -500,12 +501,12 @@ Cost drivers:
 - [ ] Make reviewer agents adversarial and diff-focused.
 - [x] Use structured outputs and validate them.
 - [ ] Keep task scope small.
-- [ ] Build evals early.
+- [x] Build evals early.
 - [x] Keep logs inspectable.
 - [x] Prefer deterministic orchestration over open-ended agent chats.
 - [x] Add permissions per agent.
 - [x] Separate recommendations from automatic actions.
-- [ ] Measure usefulness, not just model fluency.
+- [x] Measure usefulness, not just model fluency.
 
 ## Suggested First Milestone
 
@@ -532,7 +533,7 @@ Add:
 - [x] Technical Debt agent.
 - [x] SQLite event history.
 - [x] Debt log.
-- [ ] Evaluation fixtures.
+- [x] Evaluation fixtures.
 - [ ] Role-specific local model routing.
 
 ## Suggested Third Milestone
@@ -555,5 +556,5 @@ Add:
 - [ ] Tracks technical debt without excessive noise.
 - [x] Keeps all source local unless hosted mode is explicitly enabled.
 - [x] Has clear logs for every agent decision and tool call.
-- [ ] Has basic evals that catch regressions.
+- [x] Has basic evals that catch regressions.
 - [x] Has documentation good enough for another developer to install and try it.

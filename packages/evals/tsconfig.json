@@ -3,8 +3,8 @@
   "compilerOptions": {
     "composite": true,
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": "../..",
     "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "../../packages/agents/src/**/*.ts", "../../packages/shared/src/**/*.ts"]
 }
