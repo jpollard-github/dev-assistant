@@ -4,7 +4,7 @@ Dev Assistant is a local-first multi-agent development assistant. The goal is to
 
 ## Current Status
 
-This repository has completed Phase 3: MCP capability servers. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted fallback support for hybrid mode, and local repo/git/shell/test/memory capability servers.
+This repository is in Phase 4: agent roles. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted fallback support for hybrid mode, local repo/git/shell/test/memory capability servers, and capability-backed advisory outputs for test writing, architecture review, and technical debt tracking.
 
 Roadmap, phase progress, milestones, MVP definition of done, and project decisions now live in [TODO.md](/Users/jasonp/repos/dev-assistant/TODO.md).
 
@@ -16,7 +16,7 @@ Roadmap, phase progress, milestones, MVP definition of done, and project decisio
 - File edits and risky commands should require human approval.
 - Logs are structured so agent actions can be audited.
 - Local state lives in `.dev-assistant/`, which is ignored except for a placeholder file.
-- Phase 3 uses a real Ollama-backed model adapter and a real allowlisted shell/test execution path. Patch application is still a safe no-op until the patch workflow phase lands.
+- Phase 4 uses a real Ollama-backed model adapter, a real allowlisted shell/test execution path, and capability-backed role prompts. Patch application is still a safe no-op until the patch workflow phase lands.
 
 ## Workspace Layout
 
@@ -26,6 +26,7 @@ Roadmap, phase progress, milestones, MVP definition of done, and project decisio
 - `packages/core`: task orchestration engine, event bus, budgets, approvals, and SQLite event storage.
 - `packages/agents`: role definitions and structured output schemas for coordinator, coder, reviewer, and test-runner flows.
 - `packages/mcp-servers`: local repo, git, shell, test, and memory capability servers.
+- `packages/agents`: schemas for primary and advisory agent outputs.
 - `packages/llm`: planned local and optional hosted model adapters.
 - `packages/evals`: planned evaluation fixtures and scoring helpers.
 
@@ -161,6 +162,7 @@ corepack pnpm build
 
 - `dev-assistant run` now uses the configured Ollama model for structured agent outputs, and it can optionally fall back to a hosted Chat Completions compatible endpoint in `hybrid` mode.
 - Configured allowlisted test commands now run through the real shell/test path.
+- Advisory outputs now include test-writing recommendations, architecture review recommendations, and automatic technical debt entries written to `.dev-assistant/debt.md`.
 - The patch applier is still a no-op.
 - Hosted fallback support is implemented and unit-tested, but it was not live-validated here because no hosted credentials were configured in this repo.
 - A blocked task is currently reported in the JSON result, but the CLI does not yet turn that into a non-zero process exit code.

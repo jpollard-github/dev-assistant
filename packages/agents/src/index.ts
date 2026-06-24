@@ -3,6 +3,9 @@ import { z } from "@dev-assistant/shared";
 export const agentRoles = ["coordinator", "coder", "reviewer", "test-runner"] as const;
 export const agentRoleSchema = z.enum(agentRoles);
 export type AgentRole = (typeof agentRoles)[number];
+export const advisoryAgentRoles = ["test-writer", "architecture-review", "technical-debt"] as const;
+export const advisoryAgentRoleSchema = z.enum(advisoryAgentRoles);
+export type AdvisoryAgentRole = (typeof advisoryAgentRoles)[number];
 
 export interface JsonSchema {
   readonly $schema: string;
@@ -79,11 +82,60 @@ export const testRunnerOutputSchema = z.object({
 
 export type TestRunnerOutput = z.infer<typeof testRunnerOutputSchema>;
 
+export const testWriterOutputSchema = z.object({
+  summary: z.string().min(1),
+  coverageGaps: z.array(z.string().min(1)).default([]),
+  recommendedTests: z.array(
+    z.object({
+      filePath: z.string().min(1),
+      testName: z.string().min(1),
+      rationale: z.string().min(1)
+    })
+  )
+});
+
+export type TestWriterOutput = z.infer<typeof testWriterOutputSchema>;
+
+export const architectureReviewOutputSchema = z.object({
+  summary: z.string().min(1),
+  recommendations: z.array(
+    z.object({
+      severity: z.enum(["low", "medium", "high"]),
+      area: z.enum(["boundaries", "coupling", "dependency-direction", "migration-risk"]),
+      message: z.string().min(1),
+      filePath: z.string().min(1).optional()
+    })
+  )
+});
+
+export type ArchitectureReviewOutput = z.infer<typeof architectureReviewOutputSchema>;
+
+export const technicalDebtOutputSchema = z.object({
+  summary: z.string().min(1),
+  items: z.array(
+    z.object({
+      title: z.string().min(1),
+      priority: z.enum(["must-fix", "should-fix", "nice-to-have"]),
+      files: z.array(z.string().min(1)).default([]),
+      rationale: z.string().min(1),
+      recommendedFix: z.string().min(1)
+    })
+  )
+});
+
+export type TechnicalDebtOutput = z.infer<typeof technicalDebtOutputSchema>;
+
 export interface AgentOutputMap {
   coordinator: CoordinatorOutput;
   coder: CoderOutput;
   reviewer: ReviewerOutput;
   "test-runner": TestRunnerOutput;
+}
+
+export interface AdvisoryAgentOutputMap {
+  "test-writer": TestWriterOutput;
+  "architecture-review": ArchitectureReviewOutput;
+  "technical-debt": TechnicalDebtOutput;
 }
 
 export const agentOutputSchemas = {
@@ -92,6 +144,97 @@ export const agentOutputSchemas = {
   reviewer: reviewerOutputSchema,
   "test-runner": testRunnerOutputSchema
 } as const;
+
+export const advisoryAgentOutputSchemas = {
+  "test-writer": testWriterOutputSchema,
+  "architecture-review": architectureReviewOutputSchema,
+  "technical-debt": technicalDebtOutputSchema
+} as const;
+
+export const advisoryAgentOutputJsonSchemas: Record<AdvisoryAgentRole, JsonSchema> = {
+  "test-writer": {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "TestWriterOutput",
+    type: "object",
+    additionalProperties: false,
+    required: ["summary", "coverageGaps", "recommendedTests"],
+    properties: {
+      summary: { type: "string", minLength: 1 },
+      coverageGaps: {
+        type: "array",
+        items: { type: "string", minLength: 1 }
+      },
+      recommendedTests: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["filePath", "testName", "rationale"],
+          properties: {
+            filePath: { type: "string", minLength: 1 },
+            testName: { type: "string", minLength: 1 },
+            rationale: { type: "string", minLength: 1 }
+          }
+        }
+      }
+    }
+  },
+  "architecture-review": {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "ArchitectureReviewOutput",
+    type: "object",
+    additionalProperties: false,
+    required: ["summary", "recommendations"],
+    properties: {
+      summary: { type: "string", minLength: 1 },
+      recommendations: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["severity", "area", "message"],
+          properties: {
+            severity: { type: "string", enum: ["low", "medium", "high"] },
+            area: {
+              type: "string",
+              enum: ["boundaries", "coupling", "dependency-direction", "migration-risk"]
+            },
+            message: { type: "string", minLength: 1 },
+            filePath: { type: "string", minLength: 1 }
+          }
+        }
+      }
+    }
+  },
+  "technical-debt": {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "TechnicalDebtOutput",
+    type: "object",
+    additionalProperties: false,
+    required: ["summary", "items"],
+    properties: {
+      summary: { type: "string", minLength: 1 },
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["title", "priority", "files", "rationale", "recommendedFix"],
+          properties: {
+            title: { type: "string", minLength: 1 },
+            priority: { type: "string", enum: ["must-fix", "should-fix", "nice-to-have"] },
+            files: {
+              type: "array",
+              items: { type: "string", minLength: 1 }
+            },
+            rationale: { type: "string", minLength: 1 },
+            recommendedFix: { type: "string", minLength: 1 }
+          }
+        }
+      }
+    }
+  }
+};
 
 export function parseAgentOutput<TRole extends AgentRole>(
   role: TRole,
@@ -114,6 +257,20 @@ export function formatSchemaErrors(error: z.ZodError): string[] {
     const path = issue.path.length > 0 ? issue.path.join(".") : "root";
     return `${path}: ${issue.message}`;
   });
+}
+
+export function parseAdvisoryAgentOutput<TRole extends AdvisoryAgentRole>(
+  role: TRole,
+  value: unknown
+): AdvisoryAgentOutputMap[TRole] {
+  switch (role) {
+    case "test-writer":
+      return testWriterOutputSchema.parse(value) as AdvisoryAgentOutputMap[TRole];
+    case "architecture-review":
+      return architectureReviewOutputSchema.parse(value) as AdvisoryAgentOutputMap[TRole];
+    case "technical-debt":
+      return technicalDebtOutputSchema.parse(value) as AdvisoryAgentOutputMap[TRole];
+  }
 }
 
 export const agentOutputJsonSchemas: Record<AgentRole, JsonSchema> = {

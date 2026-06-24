@@ -118,6 +118,14 @@ export interface MemoryMcpServer {
   readRepositoryFacts(): Promise<Record<string, unknown>>;
   writeRepositoryFacts(facts: Record<string, unknown>): Promise<void>;
   readDebtLog(): Promise<string>;
+  appendDebtItems(items: readonly {
+    title: string;
+    priority: "must-fix" | "should-fix" | "nice-to-have";
+    files: readonly string[];
+    rationale: string;
+    recommendedFix: string;
+    taskId: string;
+  }[]): Promise<void>;
   listRecurringFailurePatterns(limit?: number): Promise<readonly MemoryFailurePattern[]>;
 }
 
@@ -492,6 +500,30 @@ export function createMemoryMcpServer(params: {
         return "";
       }
       return readFile(debtPath, "utf8");
+    },
+    async appendDebtItems(items) {
+      if (items.length === 0) {
+        return;
+      }
+
+      const existing = fileExists(debtPath) ? await readFile(debtPath, "utf8") : "";
+      const additions = items
+        .map((item) => {
+          const files = item.files.length > 0 ? item.files.join(", ") : "n/a";
+          return [
+            `## ${item.title}`,
+            `- priority: ${item.priority}`,
+            `- task: ${item.taskId}`,
+            `- files: ${files}`,
+            `- rationale: ${item.rationale}`,
+            `- recommended fix: ${item.recommendedFix}`
+          ].join("\n");
+        })
+        .join("\n\n");
+
+      const next = existing.trim().length > 0 ? `${existing.trim()}\n\n${additions}\n` : `${additions}\n`;
+      mkdirSync(dirname(debtPath), { recursive: true });
+      await writeFile(debtPath, next, "utf8");
     },
     async listRecurringFailurePatterns(limit = 10) {
       if (!fileExists(dbPath)) {

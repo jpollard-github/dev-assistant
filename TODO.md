@@ -10,7 +10,7 @@ This file is the planning source of truth for the repository.
 
 ## Current Status
 
-Current phase: Phase 3 complete, Phase 4 next.
+Current phase: Phase 4 in progress.
 
 What is implemented today:
 
@@ -21,12 +21,13 @@ What is implemented today:
 - The local model path has been validated in this repo with `qwen2.5:3b` and `qwen2.5-coder:7b`.
 - Phase 3 now includes repo, git, shell, test, and memory capability servers, agent permission profiles, and integration tests for every server.
 - The CLI task flow now uses the real allowlisted shell execution path for configured test commands.
+- Phase 4 now includes capability-backed coordinator/coder/reviewer/test-runner prompts, standalone advisory roles for test writing, architecture review, and technical debt tracking, and automatic debt log recording to `.dev-assistant/debt.md`.
 - Patch application is still a no-op, so the assistant is not yet MVP-useful.
 
 What that means for MVP:
 
 - The project is a strong scaffold, but not yet at the "real bug-fix assistant" stage.
-- The biggest remaining unlocks are real patch application and richer role behavior on top of the new capability servers.
+- The biggest remaining unlocks are real patch application and real test-writing/edit application on top of the new role behavior.
 
 ## Implemented Decisions
 
@@ -219,29 +220,29 @@ This phase replaces the current stubbed shell/test execution path with real tool
 
 ## Phase 4: Agent Roles
 
-- [ ] Coordinator agent:
-  - [ ] creates a short plan
-  - [ ] keeps the fixed four-role sequence through the initial real-model integration baseline
-  - [ ] enforces budgets and approvals
-- [ ] Coder agent:
-  - [ ] reads local context
-  - [ ] proposes a focused change
-  - [ ] explains risk and expected tests
+- [x] Coordinator agent:
+  - [x] creates a short plan
+  - [x] keeps the fixed four-role sequence through the initial real-model integration baseline
+  - [x] enforces budgets and approvals
+- [x] Coder agent:
+  - [x] reads local context
+  - [x] proposes a focused change
+  - [x] explains risk and expected tests
 - [ ] Reviewer agent:
-  - [ ] reviews only the actual diff
-  - [ ] prioritizes correctness and regressions
+  - [x] reviews only the actual diff
+  - [x] prioritizes correctness and regressions
   - [ ] emits findings with file and line references
 - [ ] Test Writer agent:
-  - [ ] identifies missing coverage
+  - [x] identifies missing coverage
   - [ ] adds focused tests
-  - [ ] avoids broad snapshot churn
-- [ ] Architecture Review agent:
-  - [ ] checks boundaries, coupling, dependency direction, and migration risk
-  - [ ] produces recommendations, not automatic rewrites
-- [ ] Technical Debt agent:
-  - [ ] records debt items in `.dev-assistant/debt.md` or SQLite
-  - [ ] links each item to files and task history
-  - [ ] distinguishes must-fix, should-fix, and nice-to-have
+  - [x] avoids broad snapshot churn
+- [x] Architecture Review agent:
+  - [x] checks boundaries, coupling, dependency direction, and migration risk
+  - [x] produces recommendations, not automatic rewrites
+- [x] Technical Debt agent:
+  - [x] records debt items in `.dev-assistant/debt.md` or SQLite
+  - [x] links each item to files and task history
+  - [x] distinguishes must-fix, should-fix, and nice-to-have
 
 ## Post-Phase 4 Follow-Up
 
@@ -507,9 +508,9 @@ Do not build the VS Code extension until this workflow feels useful from the CLI
 Add:
 
 - [ ] Test Writer agent.
-- [ ] Technical Debt agent.
+- [x] Technical Debt agent.
 - [x] SQLite event history.
-- [ ] Debt log.
+- [x] Debt log.
 - [ ] Evaluation fixtures.
 - [ ] Role-specific local model routing.
 

@@ -213,10 +213,20 @@ describe("memory MCP server", () => {
 
     const server = createMemoryMcpServer({ dataDir, repoPath });
     await server.writeRepositoryFacts({ framework: "typescript" });
+    await server.appendDebtItems([
+      {
+        title: "Fix flaky test",
+        priority: "should-fix",
+        files: ["src/index.ts"],
+        rationale: "The current fixture has a follow-up note.",
+        recommendedFix: "Stabilize the flaky assertion.",
+        taskId: "task-1"
+      }
+    ]);
 
     expect((await server.listTaskHistory(5))[0]?.title).toBe("Test task");
     expect((await server.readRepositoryFacts()).framework).toBe("typescript");
-    expect(await server.readDebtLog()).toContain("flaky test");
+    expect(await server.readDebtLog()).toContain("Fix flaky test");
     expect((await server.listRecurringFailurePatterns(5))[0]?.reason).toContain("Configured tests");
   });
 });

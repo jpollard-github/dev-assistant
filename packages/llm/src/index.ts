@@ -1,13 +1,20 @@
 import type {
   AgentOutputMap,
   AgentRole,
+  AdvisoryAgentOutputMap,
+  AdvisoryAgentRole,
   JsonSchema
 } from "@dev-assistant/agents";
 import {
   agentOutputJsonSchemas,
+  advisoryAgentOutputJsonSchemas,
+  advisoryAgentOutputSchemas,
   coordinatorOutputSchema,
   coderOutputSchema,
   reviewerOutputSchema,
+  testWriterOutputSchema,
+  architectureReviewOutputSchema,
+  technicalDebtOutputSchema,
   testRunnerOutputSchema
 } from "@dev-assistant/agents";
 import type {
@@ -16,6 +23,12 @@ import type {
   AgentInvocationMap,
   ModelTokenUsage
 } from "@dev-assistant/core";
+import type {
+  GitMcpServer,
+  MemoryMcpServer,
+  RepoMcpServer,
+  TestMcpServer
+} from "@dev-assistant/mcp-servers";
 
 export const llmPackageName = "@dev-assistant/llm";
 
@@ -78,6 +91,41 @@ export interface OllamaProviderOptions {
 export interface LocalAgentOptions {
   readonly provider: LocalModelProvider;
   readonly timeouts?: Partial<Record<AgentRole, number>>;
+}
+
+export interface CapabilityBackedAgentOptions extends LocalAgentOptions {
+  readonly repoPath: string;
+  readonly repoServer: RepoMcpServer;
+  readonly gitServer: GitMcpServer;
+  readonly testServer: TestMcpServer;
+  readonly memoryServer: MemoryMcpServer;
+  readonly advisoryTimeouts?: {
+    readonly "test-writer"?: number;
+    readonly "architecture-review"?: number;
+    readonly "technical-debt"?: number;
+  };
+}
+
+export interface AdvisoryAgentToolkit {
+  testWriter(input: {
+    taskId: string;
+    prompt: string;
+    plan: AgentOutputMap["coordinator"];
+    proposal: AgentOutputMap["coder"];
+  }): Promise<AgentExecutionEnvelope & { output: AdvisoryAgentOutputMap["test-writer"] }>;
+  architectureReview(input: {
+    taskId: string;
+    prompt: string;
+    plan: AgentOutputMap["coordinator"];
+    proposal: AgentOutputMap["coder"];
+  }): Promise<AgentExecutionEnvelope & { output: AdvisoryAgentOutputMap["architecture-review"] }>;
+  technicalDebt(input: {
+    taskId: string;
+    prompt: string;
+    proposal: AgentOutputMap["coder"];
+    reviewer: AgentOutputMap["reviewer"];
+    architectureReview?: AdvisoryAgentOutputMap["architecture-review"];
+  }): Promise<AgentExecutionEnvelope & { output: AdvisoryAgentOutputMap["technical-debt"] }>;
 }
 
 export interface HostedModelProviderOptions {
@@ -351,6 +399,162 @@ export function createLocalAgentHandlers(options: LocalAgentOptions): AgentHandl
   };
 }
 
+export function createCapabilityBackedAgentHandlers(
+  options: CapabilityBackedAgentOptions
+): AgentHandlers {
+  const { provider, timeouts, repoServer, gitServer, testServer, memoryServer, repoPath } = options;
+
+  return {
+    async coordinator(input) {
+      const [branch, status, repoFacts, failures] = await Promise.all([
+        gitServer.currentBranch(),
+        gitServer.status(),
+        memoryServer.readRepositoryFacts(),
+        memoryServer.listRecurringFailurePatterns(5)
+      ]);
+      return generateStructuredAgentOutput({
+        provider,
+        role: "coordinator",
+        schema: agentOutputJsonSchemas.coordinator,
+        validator: (value) => coordinatorOutputSchema.parse(value),
+        prompt: renderCapabilityAwareCoordinatorPrompt(input, provider.capabilities, {
+          repoPath,
+          branch,
+          status,
+          repoFacts,
+          failures
+        }),
+        ...(timeouts?.coordinator === undefined ? {} : { timeoutMs: timeouts.coordinator })
+      });
+    },
+    async coder(input) {
+      const context = await gatherCodingContext(repoServer, gitServer, input.prompt, input.plan);
+      return generateStructuredAgentOutput({
+        provider,
+        role: "coder",
+        schema: agentOutputJsonSchemas.coder,
+        validator: (value) => coderOutputSchema.parse(value),
+        prompt: renderCapabilityAwareCoderPrompt(input, provider.capabilities, context),
+        ...(timeouts?.coder === undefined ? {} : { timeoutMs: timeouts.coder })
+      });
+    },
+    async reviewer(input) {
+      const [gitDiff, failures] = await Promise.all([
+        gitServer.diff(),
+        memoryServer.listRecurringFailurePatterns(5)
+      ]);
+      return generateStructuredAgentOutput({
+        provider,
+        role: "reviewer",
+        schema: agentOutputJsonSchemas.reviewer,
+        validator: (value) => reviewerOutputSchema.parse(value),
+        prompt: renderCapabilityAwareReviewerPrompt(input, provider.capabilities, {
+          gitDiff,
+          failures
+        }),
+        ...(timeouts?.reviewer === undefined ? {} : { timeoutMs: timeouts.reviewer })
+      });
+    },
+    async "test-runner"(input) {
+      if (input.commands.length === 0) {
+        return {
+          output: {
+            summary: "No configured test commands were executed.",
+            passed: true,
+            commandResults: []
+          },
+          metadata: {
+            promptSnapshot: "SYSTEM:\nDeterministic no-test fallback.\n\nUSER:\nNo commands provided.",
+            provider: "deterministic",
+            model: "no-test-short-circuit",
+            durationMs: 0,
+            finishReason: "short-circuit"
+          }
+        };
+      }
+
+      const packageManager = await testServer.discoverPackageManager();
+      const parsedResults = input.commands.map((command) =>
+        testServer.parseCommonTestOutput(command)
+      );
+
+      return generateStructuredAgentOutput({
+        provider,
+        role: "test-runner",
+        schema: agentOutputJsonSchemas["test-runner"],
+        validator: (value) => testRunnerOutputSchema.parse(value),
+        prompt: renderCapabilityAwareTestRunnerPrompt(input, provider.capabilities, {
+          packageManager,
+          parsedResults
+        }),
+        ...(timeouts?.["test-runner"] === undefined
+          ? {}
+          : { timeoutMs: timeouts["test-runner"] })
+      });
+    }
+  };
+}
+
+export function createAdvisoryAgentToolkit(
+  options: CapabilityBackedAgentOptions
+): AdvisoryAgentToolkit {
+  const { provider, repoServer, gitServer, memoryServer, repoPath, advisoryTimeouts } = options;
+
+  return {
+    async testWriter(input) {
+      const searchHits = await repoServer.search("test");
+      return generateAdvisoryAgentOutput({
+        provider,
+        role: "test-writer",
+        schema: advisoryAgentOutputJsonSchemas["test-writer"],
+        validator: (value) => testWriterOutputSchema.parse(value),
+        prompt: renderTestWriterPrompt(input, provider.capabilities, {
+          repoPath,
+          likelyTestFiles: searchHits.slice(0, 20)
+        }),
+        ...(advisoryTimeouts?.["test-writer"] === undefined
+          ? {}
+          : { timeoutMs: advisoryTimeouts["test-writer"] })
+      });
+    },
+    async architectureReview(input) {
+      const [files, branch] = await Promise.all([
+        repoServer.listFiles({ recursive: false }),
+        gitServer.currentBranch()
+      ]);
+      return generateAdvisoryAgentOutput({
+        provider,
+        role: "architecture-review",
+        schema: advisoryAgentOutputJsonSchemas["architecture-review"],
+        validator: (value) => architectureReviewOutputSchema.parse(value),
+        prompt: renderArchitectureReviewPrompt(input, provider.capabilities, {
+          repoPath,
+          branch,
+          topLevelFiles: files.slice(0, 40)
+        }),
+        ...(advisoryTimeouts?.["architecture-review"] === undefined
+          ? {}
+          : { timeoutMs: advisoryTimeouts["architecture-review"] })
+      });
+    },
+    async technicalDebt(input) {
+      const existingDebt = await memoryServer.readDebtLog();
+      return generateAdvisoryAgentOutput({
+        provider,
+        role: "technical-debt",
+        schema: advisoryAgentOutputJsonSchemas["technical-debt"],
+        validator: (value) => technicalDebtOutputSchema.parse(value),
+        prompt: renderTechnicalDebtPrompt(input, provider.capabilities, {
+          existingDebt
+        }),
+        ...(advisoryTimeouts?.["technical-debt"] === undefined
+          ? {}
+          : { timeoutMs: advisoryTimeouts["technical-debt"] })
+      });
+    }
+  };
+}
+
 async function generateStructuredAgentOutput<TRole extends AgentRole, TOutput extends AgentOutputMap[TRole]>(
   params: {
     readonly provider: LocalModelProvider;
@@ -364,6 +568,49 @@ async function generateStructuredAgentOutput<TRole extends AgentRole, TOutput ex
     };
   }
 ): Promise<AgentExecutionEnvelope> {
+  const result = await params.provider.generateStructured({
+    systemPrompt: params.prompt.systemPrompt,
+    userPrompt: params.prompt.userPrompt,
+    schema: params.schema,
+    validator: params.validator,
+    ...(params.timeoutMs === undefined ? {} : { timeoutMs: params.timeoutMs })
+  });
+
+  const metadata: AgentExecutionEnvelope["metadata"] = {
+    promptSnapshot: renderPromptSnapshot(params.prompt.systemPrompt, params.prompt.userPrompt),
+    provider: result.provider,
+    model: result.model,
+    durationMs: result.durationMs
+  };
+
+  if (result.usage) {
+    Object.assign(metadata, { tokenUsage: result.usage });
+  }
+
+  if (result.finishReason) {
+    Object.assign(metadata, { finishReason: result.finishReason });
+  }
+
+  return {
+    output: result.object,
+    metadata
+  };
+}
+
+async function generateAdvisoryAgentOutput<
+  TRole extends AdvisoryAgentRole,
+  TOutput extends AdvisoryAgentOutputMap[TRole]
+>(params: {
+  readonly provider: LocalModelProvider;
+  readonly role: TRole;
+  readonly schema: JsonSchema;
+  readonly validator: (value: unknown) => TOutput;
+  readonly prompt: {
+    readonly systemPrompt: string;
+    readonly userPrompt: string;
+  };
+  readonly timeoutMs?: number;
+}): Promise<AgentExecutionEnvelope & { output: TOutput }> {
   const result = await params.provider.generateStructured({
     systemPrompt: params.prompt.systemPrompt,
     userPrompt: params.prompt.userPrompt,
@@ -663,6 +910,344 @@ function withOptionalProperties<TBase extends Record<string, unknown>, TOptional
   }
 
   return result as TBase & Partial<TOptional>;
+}
+
+function renderCapabilityAwareCoordinatorPrompt(
+  input: AgentInvocationMap["coordinator"],
+  capabilities: ModelCapabilityMetadata,
+  context: {
+    readonly repoPath: string;
+    readonly branch: string;
+    readonly status: string;
+    readonly repoFacts: Record<string, unknown>;
+    readonly failures: readonly { reason: string; count: number }[];
+  }
+): { readonly systemPrompt: string; readonly userPrompt: string } {
+  return {
+    systemPrompt:
+      "You are the coordinator for a local-first development assistant. Create a short plan for the fixed coordinator -> coder -> reviewer -> test-runner sequence, taking the current repository state into account. Reply only with JSON matching the schema.",
+    userPrompt: `Repository: ${context.repoPath}
+Current branch: ${context.branch}
+Git status:
+${context.status || "(clean)"}
+
+Repository facts:
+${JSON.stringify(context.repoFacts, null, 2)}
+
+Recurring failure patterns:
+${JSON.stringify(context.failures, null, 2)}
+
+Task title: ${input.title}
+
+Task prompt:
+${input.prompt}
+
+Model capabilities:
+${JSON.stringify(capabilities, null, 2)}
+
+Requirements:
+- Create 3 to 4 concise steps.
+- Keep the fixed role order.
+- Call out testing if the task touches behavior.
+- Be specific enough that a coder can pick likely files or commands.`
+  };
+}
+
+function renderCapabilityAwareCoderPrompt(
+  input: AgentInvocationMap["coder"],
+  capabilities: ModelCapabilityMetadata,
+  context: {
+    readonly gitStatus: string;
+    readonly candidateFiles: readonly string[];
+    readonly fileSnippets: readonly { path: string; content: string }[];
+  }
+): { readonly systemPrompt: string; readonly userPrompt: string } {
+  return {
+    systemPrompt:
+      "You are the coder agent for a local-first development assistant. Read the provided repository context and propose a focused change. Reply only with JSON matching the schema.",
+    userPrompt: `User task:
+${input.prompt}
+
+Coordinator plan:
+${JSON.stringify(input.plan, null, 2)}
+
+Git status:
+${context.gitStatus || "(clean)"}
+
+Candidate files:
+${JSON.stringify(context.candidateFiles, null, 2)}
+
+File snippets:
+${JSON.stringify(context.fileSnippets, null, 2)}
+
+Model capabilities:
+${JSON.stringify(capabilities, null, 2)}
+
+Requirements:
+- Name likely files when possible.
+- Explain risk and expected tests in the rationale.
+- Keep commands narrow and relevant.
+- If context is insufficient, say so clearly in rationale rather than inventing details.`
+  };
+}
+
+function renderCapabilityAwareReviewerPrompt(
+  input: AgentInvocationMap["reviewer"],
+  capabilities: ModelCapabilityMetadata,
+  context: {
+    readonly gitDiff: string;
+    readonly failures: readonly { reason: string; count: number }[];
+  }
+): { readonly systemPrompt: string; readonly userPrompt: string } {
+  return {
+    systemPrompt:
+      "You are the reviewer agent for a local-first development assistant. Review only the actual proposed diff and likely regression risk. Prioritize correctness. Reply only with JSON matching the schema.",
+    userPrompt: `User task:
+${input.prompt}
+
+Coordinator plan:
+${JSON.stringify(input.plan, null, 2)}
+
+Patch proposal:
+${JSON.stringify(input.proposal, null, 2)}
+
+Patch result:
+${JSON.stringify(input.patchResult, null, 2)}
+
+Current git diff:
+${truncateText(context.gitDiff || "(no current diff)", 4000)}
+
+Recurring failure patterns:
+${JSON.stringify(context.failures, null, 2)}
+
+Model capabilities:
+${JSON.stringify(capabilities, null, 2)}
+
+Requirements:
+- Review only the proposed change and its likely impact.
+- Findings must be concrete and action-oriented.
+- Include filePath and line when the proposal supports it.
+- Approve only if the proposal seems safe enough for the next step.`
+  };
+}
+
+function renderCapabilityAwareTestRunnerPrompt(
+  input: AgentInvocationMap["test-runner"],
+  capabilities: ModelCapabilityMetadata,
+  context: {
+    readonly packageManager: string;
+    readonly parsedResults: readonly {
+      framework: string | null;
+      passed: boolean;
+      passedCount: number | null;
+      failedCount: number | null;
+      rawSummary: string;
+    }[];
+  }
+): { readonly systemPrompt: string; readonly userPrompt: string } {
+  return {
+    systemPrompt:
+      "You are the test-runner summarizer for a local-first development assistant. Summarize executed test commands accurately using the provided parsed results. Reply only with JSON matching the schema.",
+    userPrompt: `User task:
+${input.prompt}
+
+Package manager:
+${context.packageManager}
+
+Observed command results:
+${JSON.stringify(input.commands, null, 2)}
+
+Parsed test results:
+${JSON.stringify(context.parsedResults, null, 2)}
+
+Model capabilities:
+${JSON.stringify(capabilities, null, 2)}
+
+Requirements:
+- Preserve the observed command results exactly.
+- Mark passed true only if every command succeeded.
+- Mention the most relevant parsed summary in the top-level summary.`
+  };
+}
+
+function renderTestWriterPrompt(
+  input: {
+    readonly taskId: string;
+    readonly prompt: string;
+    readonly plan: AgentOutputMap["coordinator"];
+    readonly proposal: AgentOutputMap["coder"];
+  },
+  capabilities: ModelCapabilityMetadata,
+  context: {
+    readonly repoPath: string;
+    readonly likelyTestFiles: readonly { path: string; line: number; column: number; preview: string }[];
+  }
+): { readonly systemPrompt: string; readonly userPrompt: string } {
+  return {
+    systemPrompt:
+      "You are the test writer agent for a local-first development assistant. Identify focused coverage gaps and recommend narrow tests only. Avoid broad snapshot churn. Reply only with JSON matching the schema.",
+    userPrompt: `Repository: ${context.repoPath}
+Task:
+${input.prompt}
+
+Plan:
+${JSON.stringify(input.plan, null, 2)}
+
+Proposal:
+${JSON.stringify(input.proposal, null, 2)}
+
+Likely existing test files:
+${JSON.stringify(context.likelyTestFiles, null, 2)}
+
+Model capabilities:
+${JSON.stringify(capabilities, null, 2)}`
+  };
+}
+
+function renderArchitectureReviewPrompt(
+  input: {
+    readonly taskId: string;
+    readonly prompt: string;
+    readonly plan: AgentOutputMap["coordinator"];
+    readonly proposal: AgentOutputMap["coder"];
+  },
+  capabilities: ModelCapabilityMetadata,
+  context: {
+    readonly repoPath: string;
+    readonly branch: string;
+    readonly topLevelFiles: readonly { path: string; kind: "file" | "directory" }[];
+  }
+): { readonly systemPrompt: string; readonly userPrompt: string } {
+  return {
+    systemPrompt:
+      "You are the architecture review agent for a local-first development assistant. Review boundaries, coupling, dependency direction, and migration risk. Produce recommendations only, not rewrites. Reply only with JSON matching the schema.",
+    userPrompt: `Repository: ${context.repoPath}
+Branch: ${context.branch}
+Task:
+${input.prompt}
+
+Plan:
+${JSON.stringify(input.plan, null, 2)}
+
+Proposal:
+${JSON.stringify(input.proposal, null, 2)}
+
+Top-level repository layout:
+${JSON.stringify(context.topLevelFiles, null, 2)}
+
+Model capabilities:
+${JSON.stringify(capabilities, null, 2)}`
+  };
+}
+
+function renderTechnicalDebtPrompt(
+  input: {
+    readonly taskId: string;
+    readonly prompt: string;
+    readonly proposal: AgentOutputMap["coder"];
+    readonly reviewer: AgentOutputMap["reviewer"];
+    readonly architectureReview?: AdvisoryAgentOutputMap["architecture-review"];
+  },
+  capabilities: ModelCapabilityMetadata,
+  context: {
+    readonly existingDebt: string;
+  }
+): { readonly systemPrompt: string; readonly userPrompt: string } {
+  return {
+    systemPrompt:
+      "You are the technical debt agent for a local-first development assistant. Turn review and architecture findings into a concise debt log. Distinguish must-fix, should-fix, and nice-to-have items. Reply only with JSON matching the schema.",
+    userPrompt: `Task:
+${input.prompt}
+
+Proposal:
+${JSON.stringify(input.proposal, null, 2)}
+
+Reviewer findings:
+${JSON.stringify(input.reviewer, null, 2)}
+
+Architecture review:
+${JSON.stringify(input.architectureReview ?? { summary: "No architecture review provided.", recommendations: [] }, null, 2)}
+
+Existing debt log:
+${truncateText(context.existingDebt || "(empty)", 3000)}
+
+Model capabilities:
+${JSON.stringify(capabilities, null, 2)}
+
+Requirements:
+- Prefer a small number of high-signal items.
+- Avoid duplicates when the debt log already contains a similar issue.
+- Use files from the proposal or findings when possible.`
+  };
+}
+
+function truncateText(value: string, maxChars: number): string {
+  return value.length <= maxChars ? value : `${value.slice(0, maxChars)}\n...[truncated]`;
+}
+
+function extractSearchTerms(prompt: string): string[] {
+  return Array.from(
+    new Set(
+      prompt
+        .toLowerCase()
+        .split(/[^a-z0-9._/-]+/)
+        .filter((part) => part.length >= 4)
+    )
+  );
+}
+
+async function gatherCodingContext(
+  repoServer: RepoMcpServer,
+  gitServer: GitMcpServer,
+  prompt: string,
+  plan: AgentOutputMap["coordinator"]
+): Promise<{
+  readonly gitStatus: string;
+  readonly candidateFiles: readonly string[];
+  readonly fileSnippets: readonly { path: string; content: string }[];
+}> {
+  const [gitStatus, fileList] = await Promise.all([
+    gitServer.status(),
+    repoServer.listFiles({ recursive: true })
+  ]);
+
+  const searchTerms = extractSearchTerms(prompt);
+  const matches = (
+    await Promise.all(
+      searchTerms.slice(0, 5).map(async (term) => {
+        try {
+          return await repoServer.search(term);
+        } catch {
+          return [];
+        }
+      })
+    )
+  ).flat();
+
+  const candidateFiles = Array.from(
+    new Set([
+      ...matches.map((match) => match.path),
+      ...fileList.filter((file) => file.kind === "file").slice(0, 12).map((file) => file.path)
+    ])
+  )
+    .filter((path) => !path.includes(".dev-assistant/"))
+    .slice(0, Math.max(4, plan.steps.length * 2));
+
+  const fileSnippets = await Promise.all(
+    candidateFiles.slice(0, 4).map(async (path) => ({
+      path,
+      content: await repoServer
+        .readFile(path)
+        .then((content) => truncateText(content, 700))
+        .catch(() => "")
+    }))
+  );
+
+  return {
+    gitStatus,
+    candidateFiles,
+    fileSnippets: fileSnippets.filter((file) => file.content.length > 0)
+  };
 }
 
 function renderCoordinatorPrompt(

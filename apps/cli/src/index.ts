@@ -3,12 +3,20 @@ import { join } from "node:path";
 
 import { TaskCoordinator, SqliteTaskEventStore } from "@dev-assistant/core";
 import {
+  createAdvisoryAgentToolkit,
+  createCapabilityBackedAgentHandlers,
   createFallbackProvider,
   createHostedModelProvider,
-  createLocalAgentHandlers,
   createOllamaProvider
 } from "@dev-assistant/llm";
-import { createShellMcpServer, createShellRunnerFromMcpServer } from "@dev-assistant/mcp-servers";
+import {
+  createGitMcpServer,
+  createMemoryMcpServer,
+  createRepoMcpServer,
+  createShellMcpServer,
+  createShellRunnerFromMcpServer,
+  createTestMcpServer
+} from "@dev-assistant/mcp-servers";
 import {
   ensureDataDir,
   loadAssistantConfig,
@@ -72,12 +80,52 @@ async function runTask(args: string[]): Promise<void> {
   const dataDir = ensureDataDir(config);
   const store = new SqliteTaskEventStore(join(dataDir, "tasks.sqlite"));
   const repoPath = resolveRepoPath(config);
+  const repoServer = createRepoMcpServer(repoPath);
+  const gitServer = createGitMcpServer(repoPath);
   const shellServer = createShellMcpServer({
     repoPath,
     allowlist: config.allowedShellCommands
   });
-  const agents = createLocalAgentHandlers({
-    provider: resolveModelProvider(config)
+  const testServer = createTestMcpServer({
+    repoPath,
+    shellServer
+  });
+  const memoryServer = createMemoryMcpServer({
+    repoPath,
+    dataDir
+  });
+  const provider = resolveModelProvider(config);
+  const agents = createCapabilityBackedAgentHandlers({
+    provider,
+    repoPath,
+    repoServer,
+    gitServer,
+    testServer,
+    memoryServer,
+    timeouts: {
+      coordinator: 20_000,
+      coder: 45_000,
+      reviewer: 30_000,
+      "test-runner": 20_000
+    },
+    advisoryTimeouts: {
+      "test-writer": 20_000,
+      "architecture-review": 20_000,
+      "technical-debt": 20_000
+    }
+  });
+  const advisoryToolkit = createAdvisoryAgentToolkit({
+    provider,
+    repoPath,
+    repoServer,
+    gitServer,
+    testServer,
+    memoryServer,
+    advisoryTimeouts: {
+      "test-writer": 20_000,
+      "architecture-review": 20_000,
+      "technical-debt": 20_000
+    }
   });
   const coordinator = new TaskCoordinator({
     store,
@@ -126,6 +174,56 @@ async function runTask(args: string[]): Promise<void> {
     }
   });
 
+  let advisorySummary:
+    | {
+        readonly testWriter: Awaited<ReturnType<typeof advisoryToolkit.testWriter>>["output"] | null;
+        readonly architectureReview:
+          | Awaited<ReturnType<typeof advisoryToolkit.architectureReview>>["output"]
+          | null;
+        readonly technicalDebt: Awaited<ReturnType<typeof advisoryToolkit.technicalDebt>>["output"] | null;
+      }
+    | null = null;
+
+  if (result.outputs.coordinator && result.outputs.coder && result.outputs.reviewer) {
+    const architectureReview = await advisoryToolkit.architectureReview({
+      taskId: result.task.id,
+      prompt,
+      plan: result.outputs.coordinator,
+      proposal: result.outputs.coder
+    });
+
+    const testWriter =
+      result.outputs.coordinator.requiresTests || result.outputs.coder.files.length > 0
+        ? await advisoryToolkit.testWriter({
+            taskId: result.task.id,
+            prompt,
+            plan: result.outputs.coordinator,
+            proposal: result.outputs.coder
+          })
+        : null;
+
+    const technicalDebt = await advisoryToolkit.technicalDebt({
+      taskId: result.task.id,
+      prompt,
+      proposal: result.outputs.coder,
+      reviewer: result.outputs.reviewer,
+      architectureReview: architectureReview.output
+    });
+
+    await memoryServer.appendDebtItems(
+      technicalDebt.output.items.map((item) => ({
+        ...item,
+        taskId: result.task.id
+      }))
+    );
+
+    advisorySummary = {
+      testWriter: testWriter?.output ?? null,
+      architectureReview: architectureReview.output,
+      technicalDebt: technicalDebt.output
+    };
+  }
+
   console.log(
     JSON.stringify(
       {
@@ -139,7 +237,8 @@ async function runTask(args: string[]): Promise<void> {
           reviewerFindings: result.outputs.reviewer?.findings ?? [],
           testPassed: result.outputs["test-runner"]?.passed ?? null,
           testCommandResults: result.outputs["test-runner"]?.commandResults ?? []
-        }
+        },
+        advisory: advisorySummary
       },
       null,
       2

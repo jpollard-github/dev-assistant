@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createAdvisoryAgentToolkit,
+  createCapabilityBackedAgentHandlers,
   createFallbackProvider,
   createHostedModelProvider,
   createLocalAgentHandlers,
@@ -11,6 +13,7 @@ import {
   type TextGenerationRequest,
   type TextGenerationResult
 } from "./index.js";
+import type { GitMcpServer, MemoryMcpServer, RepoMcpServer, TestMcpServer } from "@dev-assistant/mcp-servers";
 
 function createFakeProvider(): LocalModelProvider {
   return {
@@ -28,11 +31,76 @@ function createFakeProvider(): LocalModelProvider {
     async generateStructured<TOutput>(
       request: StructuredGenerationRequest<TOutput>
     ): Promise<StructuredGenerationResult<TOutput>> {
-      const value = request.validator({
-        summary: "Planned task",
-        steps: [{ id: "plan", description: "Do the task", kind: "analysis" }],
-        requiresTests: true
-      });
+      const candidates: unknown[] = [
+        {
+          summary: "Planned task",
+          steps: [{ id: "plan", description: "Do the task", kind: "analysis" }],
+          requiresTests: true
+        },
+        {
+          summary: "Code proposal",
+          rationale: "Use the available context",
+          diff: "--- a/file.ts\n+++ b/file.ts\n@@\n+change\n",
+          files: [{ path: "src/index.ts", changeType: "update" }],
+          commands: ["corepack pnpm test"]
+        },
+        {
+          summary: "Review summary",
+          approved: true,
+          findings: []
+        },
+        {
+          summary: "Tests summary",
+          passed: true,
+          commandResults: []
+        },
+        {
+          summary: "Coverage summary",
+          coverageGaps: ["Missing edge-case coverage"],
+          recommendedTests: [
+            {
+              filePath: "src/index.test.ts",
+              testName: "handles edge case",
+              rationale: "Protects the changed behavior"
+            }
+          ]
+        },
+        {
+          summary: "Architecture summary",
+          recommendations: [
+            {
+              severity: "low",
+              area: "boundaries",
+              message: "Keep the boundary focused",
+              filePath: "src/index.ts"
+            }
+          ]
+        },
+        {
+          summary: "Debt summary",
+          items: [
+            {
+              title: "Track follow-up cleanup",
+              priority: "should-fix",
+              files: ["src/index.ts"],
+              rationale: "There is a small follow-up risk.",
+              recommendedFix: "Refactor the touched code path."
+            }
+          ]
+        }
+      ];
+
+      let value: TOutput | undefined;
+      for (const candidate of candidates) {
+        try {
+          value = request.validator(candidate);
+          break;
+        } catch {}
+      }
+
+      if (value === undefined) {
+        throw new Error("No fake candidate matched validator.");
+      }
 
       return {
         text: JSON.stringify(value),
@@ -56,6 +124,185 @@ describe("resolveModelCapabilities", () => {
 
     expect(capabilities.structuredOutputReliability).toBe("high");
     expect(capabilities.recommendedRoles).toContain("coder");
+  });
+});
+
+function createFakeServers(): {
+  repoServer: RepoMcpServer;
+  gitServer: GitMcpServer;
+  testServer: TestMcpServer;
+  memoryServer: MemoryMcpServer;
+} {
+  const repoServer: RepoMcpServer = {
+    async listFiles() {
+      return [
+        { path: "src/index.ts", kind: "file" },
+        { path: "src/index.test.ts", kind: "file" }
+      ];
+    },
+    async readFile(path: string) {
+      return `content for ${path}`;
+    },
+    async search(pattern: string) {
+      return [{ path: "src/index.ts", line: 1, column: 1, preview: pattern }];
+    },
+    async inspectFileMetadata(path: string) {
+      return {
+        path,
+        size: 10,
+        modifiedAt: new Date().toISOString(),
+        isDirectory: false,
+        extension: ".ts"
+      };
+    }
+  };
+
+  const gitServer: GitMcpServer = {
+    async status() {
+      return " M src/index.ts";
+    },
+    async diff() {
+      return "diff --git a/src/index.ts b/src/index.ts";
+    },
+    async log() {
+      return [{ commit: "abc", author: "Test", subject: "Initial" }];
+    },
+    async currentBranch() {
+      return "main";
+    }
+  };
+
+  const testServer: TestMcpServer = {
+    async discoverPackageManager() {
+      return "pnpm";
+    },
+    async runConfiguredTestCommands() {
+      return {
+        packageManager: "pnpm",
+        commandResults: [],
+        parsedResults: [],
+        passed: true
+      };
+    },
+    parseCommonTestOutput() {
+      return {
+        framework: "vitest",
+        passed: true,
+        passedCount: 1,
+        failedCount: 0,
+        rawSummary: "Tests 1 passed"
+      };
+    }
+  };
+
+  const memoryServer: MemoryMcpServer = {
+    async listTaskHistory() {
+      return [];
+    },
+    async readRepositoryFacts() {
+      return { language: "typescript" };
+    },
+    async writeRepositoryFacts() {},
+    async readDebtLog() {
+      return "";
+    },
+    async appendDebtItems() {},
+    async listRecurringFailurePatterns() {
+      return [{ reason: "Configured tests did not pass.", count: 2 }];
+    }
+  };
+
+  return { repoServer, gitServer, testServer, memoryServer };
+}
+
+describe("createCapabilityBackedAgentHandlers", () => {
+  it("uses repository capability context for role prompts", async () => {
+    const handlers = createCapabilityBackedAgentHandlers({
+      provider: createFakeProvider(),
+      repoPath: "/repo",
+      ...createFakeServers()
+    });
+
+    const coordinator = await handlers.coordinator({
+      taskId: "task-ctx-1",
+      title: "Fix bug",
+      prompt: "Fix src index behavior"
+    });
+    const coder = await handlers.coder({
+      taskId: "task-ctx-1",
+      prompt: "Fix src index behavior",
+      plan: (coordinator as { output: { summary: string; steps: { id: string; description: string; kind: "analysis" | "edit" | "review" | "test" }[]; requiresTests: boolean } }).output
+    });
+
+    const envelope = coder as { metadata?: { promptSnapshot?: string } };
+    expect(envelope.metadata?.promptSnapshot).toContain("Candidate files");
+    expect(envelope.metadata?.promptSnapshot).toContain("Git status");
+  });
+});
+
+describe("createAdvisoryAgentToolkit", () => {
+  it("produces standalone advisory role outputs", async () => {
+    const toolkit = createAdvisoryAgentToolkit({
+      provider: createFakeProvider(),
+      repoPath: "/repo",
+      ...createFakeServers()
+    });
+
+    const testWriter = await toolkit.testWriter({
+      taskId: "task-adv-1",
+      prompt: "Fix behavior",
+      plan: {
+        summary: "Plan",
+        steps: [{ id: "edit", description: "Edit file", kind: "edit" }],
+        requiresTests: true
+      },
+      proposal: {
+        summary: "Code proposal",
+        rationale: "Risk noted",
+        diff: "--- a/src/index.ts\n+++ b/src/index.ts\n",
+        files: [{ path: "src/index.ts", changeType: "update" }],
+        commands: ["corepack pnpm test"]
+      }
+    });
+
+    const architectureReview = await toolkit.architectureReview({
+      taskId: "task-adv-1",
+      prompt: "Fix behavior",
+      plan: {
+        summary: "Plan",
+        steps: [{ id: "edit", description: "Edit file", kind: "edit" }],
+        requiresTests: true
+      },
+      proposal: {
+        summary: "Code proposal",
+        rationale: "Risk noted",
+        diff: "--- a/src/index.ts\n+++ b/src/index.ts\n",
+        files: [{ path: "src/index.ts", changeType: "update" }],
+        commands: ["corepack pnpm test"]
+      }
+    });
+
+    const technicalDebt = await toolkit.technicalDebt({
+      taskId: "task-adv-1",
+      prompt: "Fix behavior",
+      proposal: {
+        summary: "Code proposal",
+        rationale: "Risk noted",
+        diff: "--- a/src/index.ts\n+++ b/src/index.ts\n",
+        files: [{ path: "src/index.ts", changeType: "update" }],
+        commands: ["corepack pnpm test"]
+      },
+      reviewer: {
+        summary: "Review summary",
+        approved: true,
+        findings: []
+      },
+      architectureReview: architectureReview.output
+    });
+
+    expect(testWriter.output.recommendedTests.length).toBeGreaterThan(0);
+    expect(architectureReview.output.recommendations.length).toBeGreaterThan(0);
+    expect(technicalDebt.output.items.length).toBeGreaterThan(0);
   });
 });
 
