@@ -1,3 +1,5 @@
+import { redactSecrets } from "./security.js";
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export interface LogEvent {
@@ -18,8 +20,8 @@ export function createLogger(namespace: string): Logger {
   const write = (level: LogLevel, message: string, context?: Record<string, unknown>) => {
     const event: LogEvent = {
       level,
-      message,
-      context: { namespace, ...context },
+      message: redactSecrets(message),
+      context: redactSecrets({ namespace, ...context }),
       timestamp: new Date().toISOString()
     };
 

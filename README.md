@@ -4,7 +4,7 @@ Dev Assistant is a local-first multi-agent development assistant. The goal is to
 
 ## Current Status
 
-This repository is in Phase 8: evaluation system. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted fallback support for hybrid mode, local repo/git/shell/test/memory capability servers, capability-backed advisory outputs for test writing, architecture review, and technical debt tracking, a real structured patch-application path with validation and final task reporting, a VS Code extension with task timeline and approvals, and an eval package with benchmark fixtures, scoring, regression history, and structured-output golden cases.
+This repository is in Phase 9: security and safety. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted fallback support for hybrid mode, local repo/git/shell/test/memory capability servers, capability-backed advisory outputs for test writing, architecture review, and technical debt tracking, a real structured patch-application path with validation and final task reporting, a VS Code extension with task timeline and approvals, an eval package with benchmark fixtures/scoring/regression history, and security controls for secret-aware repo access, log redaction, hosted-code opt-in, provenance comments, and panic shutdown.
 
 Roadmap, phase progress, milestones, MVP definition of done, and project decisions now live in [TODO.md](/Users/jasonp/repos/dev-assistant/TODO.md).
 
@@ -13,10 +13,14 @@ Roadmap, phase progress, milestones, MVP definition of done, and project decisio
 - Source code stays local by default.
 - The default runtime mode is `local-only`.
 - Shell commands must be allowlisted in config before future agents can run them.
+- Shell network access is blocked unless the repo config explicitly enables it.
+- Sensitive repository paths such as `.env` and key material are blocked by default.
 - File edits and risky commands should require human approval.
 - Logs are structured so agent actions can be audited.
+- Logs redact common secret/token/private-key patterns before writing.
 - Local state lives in `.dev-assistant/`, which is ignored except for a placeholder file.
 - Phase 5 uses a real Ollama-backed model adapter, a real allowlisted shell/test execution path, capability-backed role prompts, and a controlled patch workflow that applies structured file operations inside the configured repo only.
+- Hosted or hybrid model routing now requires explicit opt-in before repository code can be sent off-machine.
 
 ## Workspace Layout
 
@@ -87,6 +91,10 @@ node apps/cli/dist/index.js run "describe the task" --dry-run
 node apps/cli/dist/index.js debt list
 node apps/cli/dist/index.js history
 
+# emergency stop for registered assistant subprocesses
+node apps/cli/dist/index.js panic
+node apps/cli/dist/index.js panic --clear
+
 # emit machine-readable JSON
 node apps/cli/dist/index.js review --json
 ```
@@ -149,7 +157,16 @@ Create `dev-assistant.config.json` at the repository root when you want to overr
   "testCommands": ["pnpm test"],
   "approvalPolicy": "on-risky-action",
   "dataDir": ".dev-assistant",
-  "mode": "local-only"
+  "mode": "local-only",
+  "security": {
+    "allowNetwork": false,
+    "allowSecretAccess": false,
+    "allowHostedCodeContext": false,
+    "redactLogs": true,
+    "requireProvenanceComments": true,
+    "panicFile": ".dev-assistant/panic.json",
+    "processRegistryFile": ".dev-assistant/processes.json"
+  }
 }
 ```
 
@@ -203,5 +220,6 @@ corepack pnpm build
 - The Test Writer is still advisory only; it recommends tests but does not apply them yet.
 - Technical debt logging is still noisy and needs deduplication before it is MVP-done.
 - The eval package provides baseline scoring and regression tracking, but it still needs to be exercised regularly against real local model runs to tune prompt quality.
+- Shell execution is safer than before, but it still runs on the host OS rather than inside a disposable VM/container sandbox.
 - Hosted fallback support is implemented and unit-tested, but it was not live-validated here because no hosted credentials were configured in this repo.
 - A blocked task is currently reported in the JSON result, but the CLI still exits with code `0` unless a command-level exception is thrown.

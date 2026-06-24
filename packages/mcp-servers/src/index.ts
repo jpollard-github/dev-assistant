@@ -1,12 +1,13 @@
-import { mkdirSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, extname, join, relative, resolve } from "node:path";
-import { execFile } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { DatabaseSync } from "node:sqlite";
 
 import type { ShellCommandResult, ShellRunner } from "@dev-assistant/core";
 import type { FileOperation } from "@dev-assistant/agents";
+import { containsLikelyNetworkCommand, isSensitivePath, redactString } from "@dev-assistant/shared";
 
 const execFileAsync = promisify(execFile);
 
@@ -53,6 +54,10 @@ export interface RepoMcpServer {
   inspectFileMetadata(path: string): Promise<RepoFileMetadata>;
 }
 
+export interface RepoAccessPolicy {
+  readonly allowSecretAccess: boolean;
+}
+
 export interface GitLogEntry {
   readonly commit: string;
   readonly author: string;
@@ -70,6 +75,7 @@ export interface ShellExecutionPolicy {
   readonly allowlist: readonly string[];
   readonly timeoutMs: number;
   readonly maxOutputChars: number;
+  readonly allowNetwork: boolean;
 }
 
 export interface ShellExecutionResult extends ShellCommandResult {
@@ -79,6 +85,11 @@ export interface ShellExecutionResult extends ShellCommandResult {
 export interface ShellMcpServer {
   readonly policy: ShellExecutionPolicy;
   run(command: string): Promise<ShellExecutionResult>;
+}
+
+export interface ShellSafetyOptions {
+  readonly panicFilePath?: string;
+  readonly processRegistryPath?: string;
 }
 
 export interface PatchApplySummary {
@@ -277,16 +288,41 @@ export class ShellCommandApprovalRequiredError extends Error {
   }
 }
 
-export function createRepoMcpServer(repoPath: string): RepoMcpServer {
+export class SecretAccessDeniedError extends Error {
+  public constructor(path: string) {
+    super(`Access to sensitive path "${path}" is blocked by the current security policy.`);
+  }
+}
+
+export class NetworkAccessDisabledError extends Error {
+  public constructor(command: string) {
+    super(`Network access is disabled by policy, so "${command}" cannot run.`);
+  }
+}
+
+export class PanicModeEnabledError extends Error {
+  public constructor() {
+    super("Panic mode is enabled. Clear panic mode before running more assistant actions.");
+  }
+}
+
+export function createRepoMcpServer(
+  repoPath: string,
+  policy: Partial<RepoAccessPolicy> = {}
+): RepoMcpServer {
   const root = resolve(repoPath);
+  const accessPolicy: RepoAccessPolicy = {
+    allowSecretAccess: policy.allowSecretAccess ?? false
+  };
 
   return {
     async listFiles(options = {}) {
       const baseDir = resolve(root, options.directory ?? ".");
       ensurePathInsideRepo(root, baseDir);
-      return walkFiles(root, baseDir, options.recursive ?? true);
+      return walkFiles(root, baseDir, options.recursive ?? true, accessPolicy);
     },
     async readFile(path) {
+      assertRepoPathAllowed(path, accessPolicy);
       const resolved = resolve(root, path);
       ensurePathInsideRepo(root, resolved);
       return readFile(resolved, "utf8");
@@ -305,9 +341,11 @@ export function createRepoMcpServer(repoPath: string): RepoMcpServer {
       return result.stdout
         .split("\n")
         .filter((line) => line.trim().length > 0)
-        .map(parseRipgrepLine);
+        .map(parseRipgrepLine)
+        .filter((match) => !isSensitivePath(match.path) || accessPolicy.allowSecretAccess);
     },
     async inspectFileMetadata(path) {
+      assertRepoPathAllowed(path, accessPolicy);
       const resolved = resolve(root, path);
       ensurePathInsideRepo(root, resolved);
       const info = await stat(resolved);
@@ -353,43 +391,33 @@ export function createShellMcpServer(params: {
   readonly allowlist: readonly string[];
   readonly timeoutMs?: number;
   readonly maxOutputChars?: number;
+  readonly allowNetwork?: boolean;
+  readonly safety?: ShellSafetyOptions;
 }): ShellMcpServer {
   const policy: ShellExecutionPolicy = {
     allowlist: params.allowlist,
     timeoutMs: params.timeoutMs ?? 30_000,
-    maxOutputChars: params.maxOutputChars ?? 8_000
+    maxOutputChars: params.maxOutputChars ?? 8_000,
+    allowNetwork: params.allowNetwork ?? false
   };
 
   return {
     policy,
     async run(command) {
+      if (params.safety?.panicFilePath && isPanicModeEnabled(params.safety.panicFilePath)) {
+        throw new PanicModeEnabledError();
+      }
+
       if (!policy.allowlist.includes(command)) {
         throw new ShellCommandApprovalRequiredError(command, policy.allowlist);
       }
 
-      const startedAt = Date.now();
-      try {
-        const { stdout, stderr } = await execFileAsync("/bin/sh", ["-lc", command], {
-          cwd: params.repoPath,
-          encoding: "utf8",
-          timeout: policy.timeoutMs,
-          maxBuffer: 4_000_000
-        });
-        return toShellExecutionResult(command, 0, stdout, stderr, startedAt, policy.maxOutputChars);
-      } catch (error) {
-        if (isExecFileError(error)) {
-          return toShellExecutionResult(
-            command,
-            error.code ?? 1,
-            error.stdout ?? "",
-            error.stderr ?? error.message,
-            startedAt,
-            policy.maxOutputChars
-          );
-        }
-
-        throw error;
+      if (!policy.allowNetwork && containsLikelyNetworkCommand(command)) {
+        throw new NetworkAccessDisabledError(command);
       }
+
+      const startedAt = Date.now();
+      return runSandboxedShellCommand(command, params.repoPath, policy, startedAt, params.safety);
     }
   };
 }
@@ -483,6 +511,7 @@ export function createPatchMcpServer(params: {
   readonly repoPath: string;
   readonly formatCommands?: readonly string[];
   readonly shellServer?: ShellMcpServer;
+  readonly requireProvenanceComments?: boolean;
 }): PatchMcpServer {
   const repoPath = resolve(params.repoPath);
 
@@ -531,7 +560,15 @@ export function createPatchMcpServer(params: {
             throw new Error(`Cannot create ${operation.path} because it already exists.`);
           }
           await mkdir(dirname(resolvedPath), { recursive: true });
-          await writeFile(resolvedPath, operation.content ?? "", "utf8");
+          await writeFile(
+            resolvedPath,
+            maybeAddProvenanceComment(
+              operation.path,
+              operation.content ?? "",
+              params.requireProvenanceComments ?? true
+            ),
+            "utf8"
+          );
           continue;
         }
 
@@ -539,7 +576,15 @@ export function createPatchMcpServer(params: {
           if (!fileExists(resolvedPath)) {
             throw new Error(`Cannot update ${operation.path} because it does not exist.`);
           }
-          await writeFile(resolvedPath, operation.content ?? "", "utf8");
+          await writeFile(
+            resolvedPath,
+            maybeAddProvenanceComment(
+              operation.path,
+              operation.content ?? "",
+              params.requireProvenanceComments ?? true
+            ),
+            "utf8"
+          );
           continue;
         }
 
@@ -686,6 +731,39 @@ export function createMemoryMcpServer(params: {
   };
 }
 
+export function triggerPanicMode(options: {
+  readonly panicFilePath: string;
+  readonly processRegistryPath: string;
+}): { readonly killedPids: readonly number[] } {
+  const killedPids = killRegisteredProcesses(options.processRegistryPath);
+  mkdirSync(dirname(options.panicFilePath), { recursive: true });
+  writeFileSync(
+    options.panicFilePath,
+    JSON.stringify(
+      {
+        enabledAt: new Date().toISOString(),
+        killedPids
+      },
+      null,
+      2
+    ).concat("\n"),
+    "utf8"
+  );
+  return { killedPids };
+}
+
+export function clearPanicMode(options: {
+  readonly panicFilePath: string;
+  readonly processRegistryPath: string;
+}): void {
+  rmSync(options.panicFilePath, { force: true });
+  rmSync(options.processRegistryPath, { force: true });
+}
+
+export function isPanicModeEnabled(panicFilePath: string): boolean {
+  return fileExists(panicFilePath);
+}
+
 function validatePatchOperations(
   repoPath: string,
   operations: readonly FileOperation[],
@@ -717,20 +795,28 @@ function validatePatchOperations(
   }
 }
 
-async function walkFiles(root: string, currentDir: string, recursive: boolean): Promise<readonly RepoFileRecord[]> {
+async function walkFiles(
+  root: string,
+  currentDir: string,
+  recursive: boolean,
+  policy: RepoAccessPolicy
+): Promise<readonly RepoFileRecord[]> {
   const entries = await readdir(currentDir, { withFileTypes: true });
   const records: RepoFileRecord[] = [];
 
   for (const entry of entries) {
     const fullPath = join(currentDir, entry.name);
     const relativePath = normalizeRepoRelative(root, fullPath);
+    if (!policy.allowSecretAccess && isSensitivePath(relativePath)) {
+      continue;
+    }
     records.push({
       path: relativePath,
       kind: entry.isDirectory() ? "directory" : "file"
     });
 
     if (recursive && entry.isDirectory()) {
-      records.push(...(await walkFiles(root, fullPath, true)));
+      records.push(...(await walkFiles(root, fullPath, true, policy)));
     }
   }
 
@@ -840,6 +926,153 @@ function parseRipgrepLine(line: string): RepoSearchResult {
 
 function fileExists(path: string): boolean {
   return statSyncSafe(path) !== null;
+}
+
+function assertRepoPathAllowed(path: string, policy: RepoAccessPolicy): void {
+  if (!policy.allowSecretAccess && isSensitivePath(path)) {
+    throw new SecretAccessDeniedError(path);
+  }
+}
+
+async function runSandboxedShellCommand(
+  command: string,
+  repoPath: string,
+  policy: ShellExecutionPolicy,
+  startedAt: number,
+  safety: ShellSafetyOptions | undefined
+): Promise<ShellExecutionResult> {
+  const child = spawn("/bin/sh", ["-lc", command], {
+    cwd: repoPath,
+    env: {
+      PATH: process.env.PATH ?? "",
+      HOME: process.env.HOME ?? "",
+      LANG: process.env.LANG ?? "C.UTF-8",
+      LC_ALL: process.env.LC_ALL ?? "C.UTF-8"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  registerProcess(child, safety?.processRegistryPath);
+
+  const stdoutChunks: string[] = [];
+  const stderrChunks: string[] = [];
+
+  child.stdout?.setEncoding("utf8");
+  child.stderr?.setEncoding("utf8");
+  child.stdout?.on("data", (chunk: string) => {
+    stdoutChunks.push(chunk);
+  });
+  child.stderr?.on("data", (chunk: string) => {
+    stderrChunks.push(chunk);
+  });
+
+  const timeout = setTimeout(() => {
+    child.kill("SIGTERM");
+  }, policy.timeoutMs);
+
+  const exitCode = await new Promise<number>((resolvePromise, reject) => {
+    child.once("error", reject);
+    child.once("close", (code) => {
+      clearTimeout(timeout);
+      resolvePromise(code ?? 1);
+    });
+  }).finally(() => {
+    unregisterProcess(child.pid, safety?.processRegistryPath);
+  });
+
+  return toShellExecutionResult(
+    command,
+    exitCode,
+    redactString(stdoutChunks.join("")),
+    redactString(stderrChunks.join("")),
+    startedAt,
+    policy.maxOutputChars
+  );
+}
+
+function registerProcess(child: ChildProcess, processRegistryPath: string | undefined): void {
+  if (!processRegistryPath || child.pid === undefined) {
+    return;
+  }
+
+  const current = readProcessRegistry(processRegistryPath);
+  if (!current.includes(child.pid)) {
+    current.push(child.pid);
+  }
+  mkdirSync(dirname(processRegistryPath), { recursive: true });
+  writeFileSync(processRegistryPath, JSON.stringify(current, null, 2).concat("\n"), "utf8");
+}
+
+function unregisterProcess(pid: number | undefined, processRegistryPath: string | undefined): void {
+  if (!processRegistryPath || pid === undefined) {
+    return;
+  }
+
+  const next = readProcessRegistry(processRegistryPath).filter((entry) => entry !== pid);
+  mkdirSync(dirname(processRegistryPath), { recursive: true });
+  writeFileSync(processRegistryPath, JSON.stringify(next, null, 2).concat("\n"), "utf8");
+}
+
+function readProcessRegistry(processRegistryPath: string): number[] {
+  try {
+    return JSON.parse(readFileSync(processRegistryPath, "utf8")) as number[];
+  } catch {
+    return [];
+  }
+}
+
+function killRegisteredProcesses(processRegistryPath: string): number[] {
+  const pids = readProcessRegistry(processRegistryPath);
+  const killed: number[] = [];
+
+  for (const pid of pids) {
+    try {
+      process.kill(pid, "SIGTERM");
+      killed.push(pid);
+    } catch {}
+  }
+
+  rmSync(processRegistryPath, { force: true });
+  return killed;
+}
+
+function maybeAddProvenanceComment(path: string, content: string, enabled: boolean): string {
+  if (!enabled || content.length === 0 || content.includes("Generated by Dev Assistant")) {
+    return content;
+  }
+
+  const comment = provenanceCommentForPath(path);
+  if (!comment) {
+    return content;
+  }
+
+  if (content.startsWith("#!")) {
+    const firstNewline = content.indexOf("\n");
+    if (firstNewline === -1) {
+      return `${content}\n${comment}\n`;
+    }
+    return `${content.slice(0, firstNewline + 1)}${comment}\n${content.slice(firstNewline + 1)}`;
+  }
+
+  return `${comment}\n${content}`;
+}
+
+function provenanceCommentForPath(path: string): string | null {
+  const extension = extname(path).toLowerCase();
+
+  if ([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".java", ".kt", ".go", ".rs", ".swift", ".css", ".scss", ".less", ".sql"].includes(extension)) {
+    return "// Generated by Dev Assistant. Review before merging.";
+  }
+
+  if ([".py", ".sh", ".rb", ".pl", ".yaml", ".yml", ".toml", ".ini", ".conf"].includes(extension)) {
+    return "# Generated by Dev Assistant. Review before merging.";
+  }
+
+  if ([".html", ".xml", ".svg"].includes(extension)) {
+    return "<!-- Generated by Dev Assistant. Review before merging. -->";
+  }
+
+  return null;
 }
 
 function statSyncSafe(path: string) {

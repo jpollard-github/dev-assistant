@@ -36,6 +36,8 @@ describe("CLI helpers", () => {
     expect(template.testCommands).toEqual(["corepack pnpm test"]);
     expect(template.formatCommands).toEqual(["corepack pnpm format"]);
     expect(template.allowedShellCommands).toEqual(["corepack pnpm test", "corepack pnpm format"]);
+    expect(template.security.allowNetwork).toBe(false);
+    expect(template.security.allowHostedCodeContext).toBe(false);
   });
 
   it("extracts changed files from unified diff text", () => {
@@ -72,5 +74,40 @@ describe("CLI helpers", () => {
     const report = buildConfigDoctorReport(cwd);
     expect(report.status).toBe("warning");
     expect(report.checks.some((check) => check.name === "test-allowlist" && check.status === "warning")).toBe(true);
+  });
+
+  it("warns when hosted mode is configured without hosted code-context opt-in", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "dev-assistant-cli-"));
+    writeFileSync(
+      join(cwd, "dev-assistant.config.json"),
+      JSON.stringify(
+        {
+          repoPath: ".",
+          model: { provider: "hosted", name: "gpt-4.1-mini" },
+          hosted: { baseUrl: "https://api.openai.com/v1", apiKeyEnvVar: "OPENAI_API_KEY" },
+          allowedShellCommands: [],
+          formatCommands: [],
+          testCommands: [],
+          approvalPolicy: "on-risky-action",
+          dataDir: ".dev-assistant",
+          mode: "hosted",
+          security: {
+            allowNetwork: false,
+            allowSecretAccess: false,
+            allowHostedCodeContext: false,
+            redactLogs: true,
+            requireProvenanceComments: true,
+            panicFile: ".dev-assistant/panic.json",
+            processRegistryFile: ".dev-assistant/processes.json"
+          }
+        },
+        null,
+        2
+      )
+    );
+
+    const report = buildConfigDoctorReport(cwd);
+    expect(report.checks.some((check) => check.name === "hosted-code-context" && check.status === "warning")).toBe(true);
+    expect(report.checks.some((check) => check.name === "network-policy" && check.status === "ok")).toBe(true);
   });
 });

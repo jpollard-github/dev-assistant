@@ -10,7 +10,7 @@ This file is the planning source of truth for the repository.
 
 ## Current Status
 
-Current phase: Phase 8 complete, with Phase 4 follow-up items still open.
+Current phase: Phase 9 complete, with Phase 4 follow-up items still open.
 
 What is implemented today:
 
@@ -28,11 +28,13 @@ What is implemented today:
 - The non-model CLI commands now work without requiring Ollama to be running.
 - Phase 7 now includes a functional VS Code extension package with an activity-bar sidebar, active-task timeline, native diff previews for patch approvals, modal approval controls for edits and shell commands, task cancellation, workspace trust gating, and history/test/debt/review commands surfaced in the editor.
 - Phase 8 now includes benchmark fixtures across six task categories, fixture materialization helpers, outcome scoring for the planned MVP quality gates, a multi-model eval matrix runner, regression-history persistence, and a golden structured-output suite for agent/advisory schemas.
+- Phase 9 now includes secret-aware repo access defaults, log redaction, network-disabled shell execution by default, hosted code-context opt-in requirements, provenance comments for generated code, panic mode for killing registered subprocesses, and a written threat model in `docs/security-threat-model.md`.
 
 What that means for MVP:
 
 - The project has crossed into an early MVP-capable state for small, low-risk tasks in both the CLI and VS Code.
 - The biggest remaining unlocks are better reviewer precision in live runs, real test-writing/edit application, and reducing technical-debt noise.
+- Security posture is now materially stronger for local-first use, but deeper isolation and secret-scanning follow-ups still remain for later phases.
 
 ## Implemented Decisions
 
@@ -340,21 +342,31 @@ This phase replaces the current no-op patch applier with a real, controlled patc
 
 ## Phase 9: Security And Safety
 
-- [ ] Default to read-only analysis until the user approves edits.
-- [ ] Sandbox shell execution as much as the host OS allows.
-- [ ] Maintain a command allowlist.
-- [ ] Block network access unless explicitly enabled.
-- [ ] Prevent agents from reading secrets by default.
-- [ ] Redact secrets in logs.
-- [ ] Never send code to hosted models unless the user opts in.
-- [ ] Add clear provenance to all generated code.
-- [ ] Add a panic button to cancel tasks and stop subprocesses.
-- [ ] Document threat models:
-  - [ ] prompt injection in repo files
-  - [ ] malicious package scripts
-  - [ ] secret exfiltration
-  - [ ] accidental destructive edits
-  - [ ] runaway token or compute usage
+- [x] Default to read-only analysis until the user approves edits.
+- [x] Sandbox shell execution as much as the host OS allows.
+- [x] Maintain a command allowlist.
+- [x] Block network access unless explicitly enabled.
+- [x] Prevent agents from reading secrets by default.
+- [x] Redact secrets in logs.
+- [x] Never send code to hosted models unless the user opts in.
+- [x] Add clear provenance to all generated code.
+- [x] Add a panic button to cancel tasks and stop subprocesses.
+- [x] Document threat models:
+  - [x] prompt injection in repo files
+  - [x] malicious package scripts
+  - [x] secret exfiltration
+  - [x] accidental destructive edits
+  - [x] runaway token or compute usage
+
+## Phase 13: Advanced Security Hardening
+
+- [ ] Add preflight secret scanning before any hosted code export.
+- [ ] Add binary-file and large-file quarantine rules for agent context gathering.
+- [ ] Isolate test and format commands in disposable sandboxes or temp clones where possible.
+- [ ] Add per-file write scopes and branch isolation for assistant edits.
+- [ ] Add tamper-evident audit log signing or checksums.
+- [ ] Add policy controls for dependency installation and package-script execution.
+- [ ] Add signed packaging and release verification for CLI and VS Code extension artifacts.
 
 ## Phase 10: Technical Debt Tracking
 
@@ -500,7 +512,7 @@ Cost drivers:
 - [x] Keep humans in the loop for edits and risky commands.
 - [ ] Make reviewer agents adversarial and diff-focused.
 - [x] Use structured outputs and validate them.
-- [ ] Keep task scope small.
+- [x] Keep task scope small.
 - [x] Build evals early.
 - [x] Keep logs inspectable.
 - [x] Prefer deterministic orchestration over open-ended agent chats.
@@ -546,6 +558,16 @@ Add:
 - [x] Workspace trust integration.
 - [x] Better cancellation and command controls.
 
+## Suggested Fourth Milestone
+
+Add:
+
+- [x] Secret-aware repo access defaults.
+- [x] Network-disabled shell execution by default.
+- [x] Hosted code-context opt-in.
+- [x] Panic mode and subprocess termination.
+- [x] Threat model documentation.
+
 ## Definition Of Done For MVP
 
 - [ ] Can run against at least three real TypeScript repositories.
@@ -557,4 +579,5 @@ Add:
 - [x] Keeps all source local unless hosted mode is explicitly enabled.
 - [x] Has clear logs for every agent decision and tool call.
 - [x] Has basic evals that catch regressions.
+- [x] Has baseline security controls for secrets, network use, provenance, and panic shutdown.
 - [x] Has documentation good enough for another developer to install and try it.

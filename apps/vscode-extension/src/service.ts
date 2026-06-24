@@ -13,6 +13,7 @@ import {
   createOllamaProvider
 } from "@dev-assistant/llm";
 import {
+  isPanicModeEnabled,
   createGitMcpServer,
   createMemoryMcpServer,
   createPatchMcpServer,
@@ -21,7 +22,14 @@ import {
   createShellRunnerFromMcpServer,
   createTestMcpServer
 } from "@dev-assistant/mcp-servers";
-import { ensureDataDir, loadAssistantConfig, resolveRepoPath, type AssistantConfig } from "@dev-assistant/shared";
+import {
+  ensureDataDir,
+  loadAssistantConfig,
+  resolvePanicFilePath,
+  resolveProcessRegistryPath,
+  resolveRepoPath,
+  type AssistantConfig
+} from "@dev-assistant/shared";
 
 export interface StartTaskOptions {
   readonly title?: string;
@@ -276,12 +284,22 @@ export class LocalWorkspaceService {
     const config = loadAssistantConfig(this.workspacePath);
     const dataDir = ensureDataDir(config, this.workspacePath);
     const repoPath = resolveRepoPath(config, this.workspacePath);
+    if (isPanicModeEnabled(resolvePanicFilePath(config, this.workspacePath))) {
+      throw new Error("Panic mode is enabled. Clear it from the CLI before starting new assistant actions.");
+    }
     const store = new SqliteTaskEventStore(join(dataDir, "tasks.sqlite"));
-    const repoServer = createRepoMcpServer(repoPath);
+    const repoServer = createRepoMcpServer(repoPath, {
+      allowSecretAccess: config.security.allowSecretAccess
+    });
     const gitServer = createGitMcpServer(repoPath);
     const shellServer = createShellMcpServer({
       repoPath,
-      allowlist: config.allowedShellCommands
+      allowlist: config.allowedShellCommands,
+      allowNetwork: config.security.allowNetwork,
+      safety: {
+        panicFilePath: resolvePanicFilePath(config, this.workspacePath),
+        processRegistryPath: resolveProcessRegistryPath(config, this.workspacePath)
+      }
     });
     const testServer = createTestMcpServer({
       repoPath,
@@ -290,7 +308,8 @@ export class LocalWorkspaceService {
     const patchServer = createPatchMcpServer({
       repoPath,
       formatCommands: config.formatCommands,
-      shellServer
+      shellServer,
+      requireProvenanceComments: config.security.requireProvenanceComments
     });
     const memoryServer = createMemoryMcpServer({
       repoPath,
@@ -363,6 +382,7 @@ function resolveModelProvider(config: AssistantConfig) {
     });
 
     if (config.mode === "hybrid" && config.hosted) {
+      assertHostedCodeContextAllowed(config);
       return createFallbackProvider(
         ollamaProvider,
         createHostedModelProvider({
@@ -378,6 +398,7 @@ function resolveModelProvider(config: AssistantConfig) {
   }
 
   if (config.model.provider === "hosted") {
+    assertHostedCodeContextAllowed(config);
     if (!config.hosted) {
       throw new Error("Hosted model provider selected but hosted config is missing.");
     }
@@ -390,6 +411,18 @@ function resolveModelProvider(config: AssistantConfig) {
   }
 
   throw new Error(`Model provider "${config.model.provider}" is not yet implemented in the extension.`);
+}
+
+function assertHostedCodeContextAllowed(config: AssistantConfig): void {
+  if (!config.security.allowNetwork) {
+    throw new Error("Hosted or hybrid model routing requires security.allowNetwork=true.");
+  }
+
+  if (!config.security.allowHostedCodeContext) {
+    throw new Error(
+      "Hosted or hybrid model routing is blocked until security.allowHostedCodeContext=true explicitly opts in to sending repository code."
+    );
+  }
 }
 
 function requireHostedApiKey(envVar: string): string {

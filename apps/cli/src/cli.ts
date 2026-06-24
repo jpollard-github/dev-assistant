@@ -14,6 +14,7 @@ import {
   createOllamaProvider
 } from "@dev-assistant/llm";
 import {
+  clearPanicMode,
   createGitMcpServer,
   createMemoryMcpServer,
   createPatchMcpServer,
@@ -21,12 +22,16 @@ import {
   createShellMcpServer,
   createShellRunnerFromMcpServer,
   createTestMcpServer,
+  isPanicModeEnabled,
+  triggerPanicMode,
   type MemoryMcpServer
 } from "@dev-assistant/mcp-servers";
 import {
   DEFAULT_CONFIG_FILE,
   ensureDataDir,
   loadAssistantConfig,
+  resolvePanicFilePath,
+  resolveProcessRegistryPath,
   resolveRepoPath,
   createLogger,
   type AssistantConfig
@@ -105,6 +110,9 @@ export async function main(argv: readonly string[]): Promise<void> {
     case "history":
       await handleHistory(args.slice(1));
       return;
+    case "panic":
+      await handlePanic(args.slice(1));
+      return;
     case "debt":
       await handleDebt(args.slice(1));
       return;
@@ -132,6 +140,7 @@ Commands:
   dev-assistant debt list [--json]
   dev-assistant debt add --title "..." --priority should-fix --rationale "..." --fix "..." [--files a,b] [--task-id id] [--json]
   dev-assistant history [task-id] [--json]
+  dev-assistant panic [--clear] [--json]
   dev-assistant help
 
 Notes:
@@ -310,7 +319,7 @@ async function handleTest(args: string[]): Promise<void> {
 
 async function handleHistory(args: string[]): Promise<void> {
   const { flags, rest } = parseCommonFlags(args);
-  const context = createBaseCommandContext(flags.json);
+  const context = createBaseCommandContext(flags.json, { enforcePanic: false });
   const taskId = rest[0];
 
   try {
@@ -329,12 +338,42 @@ async function handleHistory(args: string[]): Promise<void> {
   }
 }
 
+async function handlePanic(args: string[]): Promise<void> {
+  const { flags, rest } = parseCommonFlags(args);
+  const clear = consumeFlag(rest, "--clear").value;
+  const config = loadAssistantConfig();
+  const panicFilePath = resolvePanicFilePath(config);
+  const processRegistryPath = resolveProcessRegistryPath(config);
+
+  if (clear) {
+    clearPanicMode({ panicFilePath, processRegistryPath });
+    emit(
+      flags,
+      { cleared: true, panicFilePath, processRegistryPath },
+      "Cleared panic mode and removed the local process registry."
+    );
+    return;
+  }
+
+  const result = triggerPanicMode({ panicFilePath, processRegistryPath });
+  emit(
+    flags,
+    {
+      enabled: true,
+      panicFilePath,
+      processRegistryPath,
+      killedPids: result.killedPids
+    },
+    `Enabled panic mode and terminated ${result.killedPids.length} registered subprocess(es).`
+  );
+}
+
 async function handleDebt(args: string[]): Promise<void> {
   const subcommand = args[0] ?? "list";
 
   if (subcommand === "list") {
     const { flags } = parseCommonFlags(args.slice(1));
-    const context = createBaseCommandContext(flags.json);
+    const context = createBaseCommandContext(flags.json, { enforcePanic: false });
 
     try {
       const debtLog = await context.memoryServer.readDebtLog();
@@ -359,7 +398,7 @@ async function handleDebt(args: string[]): Promise<void> {
     const recommendedFix = requireOption(rest, "--fix");
     const files = optionalOption(rest, "--files")?.split(",").map((value) => value.trim()).filter(Boolean) ?? [];
     const taskId = optionalOption(rest, "--task-id") ?? "manual";
-    const context = createBaseCommandContext(flags.json);
+    const context = createBaseCommandContext(flags.json, { enforcePanic: false });
 
     try {
       if (!isDebtPriority(priority)) {
@@ -403,16 +442,29 @@ async function handleConfigDoctor(args: string[]): Promise<void> {
   emit(flags, report, formatDoctorReport(report));
 }
 
-function createBaseCommandContext(jsonMode: boolean): BaseCommandContext {
+function createBaseCommandContext(
+  jsonMode: boolean,
+  options: { readonly enforcePanic?: boolean } = {}
+): BaseCommandContext {
   const config = loadAssistantConfig();
   const dataDir = ensureDataDir(config);
   const repoPath = resolveRepoPath(config);
+  if (options.enforcePanic ?? true) {
+    assertAssistantActionAllowed(config);
+  }
   const store = new SqliteTaskEventStore(join(dataDir, "tasks.sqlite"));
-  const repoServer = createRepoMcpServer(repoPath);
+  const repoServer = createRepoMcpServer(repoPath, {
+    allowSecretAccess: config.security.allowSecretAccess
+  });
   const gitServer = createGitMcpServer(repoPath);
   const shellServer = createShellMcpServer({
     repoPath,
-    allowlist: config.allowedShellCommands
+    allowlist: config.allowedShellCommands,
+    allowNetwork: config.security.allowNetwork,
+    safety: {
+      panicFilePath: resolvePanicFilePath(config),
+      processRegistryPath: resolveProcessRegistryPath(config)
+    }
   });
   const testServer = createTestMcpServer({
     repoPath,
@@ -421,7 +473,8 @@ function createBaseCommandContext(jsonMode: boolean): BaseCommandContext {
   const patchServer = createPatchMcpServer({
     repoPath,
     formatCommands: config.formatCommands,
-    shellServer
+    shellServer,
+    requireProvenanceComments: config.security.requireProvenanceComments
   });
   const memoryServer = createMemoryMcpServer({
     repoPath,
@@ -451,7 +504,9 @@ function createBaseCommandContext(jsonMode: boolean): BaseCommandContext {
 function createModelCommandContext(jsonMode: boolean): ModelCommandContext {
   const base = createBaseCommandContext(jsonMode);
   const provider = resolveModelProvider(base.config);
-  const repoServer = createRepoMcpServer(base.repoPath);
+  const repoServer = createRepoMcpServer(base.repoPath, {
+    allowSecretAccess: base.config.security.allowSecretAccess
+  });
   const gitServer = createGitMcpServer(base.repoPath);
   const agents = createCapabilityBackedAgentHandlers({
     provider,
@@ -683,6 +738,7 @@ function resolveModelProvider(config: AssistantConfig) {
     });
 
     if (config.mode === "hybrid" && config.hosted) {
+      assertHostedCodeContextAllowed(config);
       return createFallbackProvider(
         ollamaProvider,
         createHostedModelProvider({
@@ -698,6 +754,7 @@ function resolveModelProvider(config: AssistantConfig) {
   }
 
   if (config.model.provider === "hosted") {
+    assertHostedCodeContextAllowed(config);
     if (!config.hosted) {
       throw new Error(
         'Hosted provider requires a "hosted" config block with "baseUrl" and "apiKeyEnvVar".'
@@ -715,6 +772,24 @@ function resolveModelProvider(config: AssistantConfig) {
   throw new Error(
     `Model provider "${config.model.provider}" is not implemented yet. Phase 2 currently supports ollama and hosted fallback.`
   );
+}
+
+function assertAssistantActionAllowed(config: AssistantConfig): void {
+  if (isPanicModeEnabled(resolvePanicFilePath(config))) {
+    throw new Error("Panic mode is enabled. Run `dev-assistant panic --clear` before starting new assistant actions.");
+  }
+}
+
+function assertHostedCodeContextAllowed(config: AssistantConfig): void {
+  if (!config.security.allowNetwork) {
+    throw new Error("Hosted or hybrid model routing requires security.allowNetwork=true.");
+  }
+
+  if (!config.security.allowHostedCodeContext) {
+    throw new Error(
+      "Hosted or hybrid model routing is blocked until security.allowHostedCodeContext=true explicitly opts in to sending repository code."
+    );
+  }
 }
 
 function requireHostedApiKey(envVarName: string): string {

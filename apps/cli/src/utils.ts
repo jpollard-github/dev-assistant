@@ -2,7 +2,15 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { DEFAULT_CONFIG_FILE, ensureDataDir, loadAssistantConfig, resolveRepoPath, type AssistantConfig } from "@dev-assistant/shared";
+import {
+  DEFAULT_CONFIG_FILE,
+  ensureDataDir,
+  isSensitivePath,
+  loadAssistantConfig,
+  resolvePanicFilePath,
+  resolveRepoPath,
+  type AssistantConfig
+} from "@dev-assistant/shared";
 
 export function buildInitConfigTemplate(cwd: string): AssistantConfig {
   const packageManager = detectPackageManager(cwd);
@@ -27,7 +35,16 @@ export function buildInitConfigTemplate(cwd: string): AssistantConfig {
     testCommands: defaultTestCommand ? [defaultTestCommand] : [],
     approvalPolicy: "on-risky-action",
     dataDir: ".dev-assistant",
-    mode: "local-only"
+    mode: "local-only",
+    security: {
+      allowNetwork: false,
+      allowSecretAccess: false,
+      allowHostedCodeContext: false,
+      redactLogs: true,
+      requireProvenanceComments: true,
+      panicFile: ".dev-assistant/panic.json",
+      processRegistryFile: ".dev-assistant/processes.json"
+    }
   };
 }
 
@@ -55,6 +72,13 @@ export function buildConfigDoctorReport(cwd: string) {
       message: `Data directory is available at ${dataDir}`
     },
     {
+      name: "panic-mode",
+      status: existsSync(resolvePanicFilePath(config, cwd)) ? "warning" : "ok",
+      message: existsSync(resolvePanicFilePath(config, cwd))
+        ? "Panic mode is enabled. Clear it before running assistant actions."
+        : "Panic mode is not active."
+    },
+    {
       name: "test-allowlist",
       status: config.testCommands.every((command) => config.allowedShellCommands.includes(command))
         ? "ok"
@@ -71,6 +95,37 @@ export function buildConfigDoctorReport(cwd: string) {
       message: config.formatCommands.every((command) => config.allowedShellCommands.includes(command))
         ? "All format commands are allowlisted."
         : "Some format commands are not present in allowedShellCommands."
+    },
+    {
+      name: "secret-access",
+      status: config.security.allowSecretAccess ? "warning" : "ok",
+      message: config.security.allowSecretAccess
+        ? "Sensitive repository paths are readable by policy."
+        : "Sensitive repository paths are blocked by default."
+    },
+    {
+      name: "hosted-code-context",
+      status:
+        (config.mode === "hybrid" || config.mode === "hosted") && !config.security.allowHostedCodeContext
+          ? "warning"
+          : "ok",
+      message:
+        (config.mode === "hybrid" || config.mode === "hosted") && !config.security.allowHostedCodeContext
+          ? "Hosted mode is configured, but sending repository code to hosted models is not opted in."
+          : "Hosted code-context policy is aligned with the current mode."
+    },
+    {
+      name: "network-policy",
+      status:
+        config.security.allowNetwork ||
+        config.allowedShellCommands.every((command) => !looksNetworkLike(command))
+          ? "ok"
+          : "warning",
+      message:
+        config.security.allowNetwork ||
+        config.allowedShellCommands.every((command) => !looksNetworkLike(command))
+          ? "Shell network policy is aligned with the allowlist."
+          : "Some allowlisted shell commands appear network-capable while network access is disabled."
     },
     ...buildProviderChecks(config)
   ];
@@ -167,13 +222,22 @@ function buildProviderChecks(config: AssistantConfig): Array<{ name: string; sta
     return [
       {
         name: "hosted-provider",
-        status: process.env[config.hosted.apiKeyEnvVar] ? "ok" : "warning",
+        status:
+          config.security.allowNetwork && process.env[config.hosted.apiKeyEnvVar]
+            ? "ok"
+            : "warning",
         message: process.env[config.hosted.apiKeyEnvVar]
-          ? `Hosted provider API key env var ${config.hosted.apiKeyEnvVar} is set.`
+          ? config.security.allowNetwork
+            ? `Hosted provider API key env var ${config.hosted.apiKeyEnvVar} is set.`
+            : `Hosted provider API key is set, but network access is disabled.`
           : `Hosted provider API key env var ${config.hosted.apiKeyEnvVar} is not set.`
       }
     ];
   }
 
   return [];
+}
+
+function looksNetworkLike(command: string): boolean {
+  return /curl|wget|ssh|scp|https?:\/\/|npm install|pnpm add|yarn add|git pull|git push/i.test(command);
 }

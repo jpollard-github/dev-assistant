@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
 
+import { securityConfigSchema } from "./security.js";
+
 export const approvalPolicySchema = z.enum(["always", "on-risky-action", "never"]);
 export type ApprovalPolicy = z.infer<typeof approvalPolicySchema>;
 
@@ -27,7 +29,8 @@ export const assistantConfigSchema = z.object({
   testCommands: z.array(z.string().min(1)).default([]),
   approvalPolicy: approvalPolicySchema.default("on-risky-action"),
   dataDir: z.string().min(1).default(".dev-assistant"),
-  mode: assistantModeSchema.default("local-only")
+  mode: assistantModeSchema.default("local-only"),
+  security: securityConfigSchema
 });
 
 export type AssistantConfig = z.infer<typeof assistantConfigSchema>;
