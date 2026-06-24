@@ -44,12 +44,19 @@ export function buildInitConfigTemplate(cwd: string): AssistantConfig {
     routing: {},
     crashReporting: {
       enabled: false,
-      directory: ".dev-assistant/crash-reports"
+      directory: ".dev-assistant/crash-reports",
+      maxLocalReports: 20,
+      allowRemoteUpload: false
     },
     security: {
       allowNetwork: false,
       allowSecretAccess: false,
       allowHostedCodeContext: false,
+      allowDependencyInstalls: false,
+      allowPackageScripts: true,
+      blockBinaryFiles: true,
+      maxContextFileBytes: 262144,
+      allowedWritePaths: [],
       redactLogs: true,
       requireProvenanceComments: true,
       panicFile: ".dev-assistant/panic.json",
@@ -94,6 +101,31 @@ export function buildConfigDoctorReport(cwd: string) {
       message: config.crashReporting.enabled
         ? `Crash reporting is enabled and will write local reports to ${config.crashReporting.directory}.`
         : "Crash reporting is disabled by default."
+    },
+    {
+      name: "dependency-installs",
+      status: config.security.allowDependencyInstalls ? "warning" : "ok",
+      message: config.security.allowDependencyInstalls
+        ? "Dependency installation commands are allowed by policy."
+        : "Dependency installation commands are blocked by default."
+    },
+    {
+      name: "binary-quarantine",
+      status: config.security.blockBinaryFiles ? "ok" : "warning",
+      message: config.security.blockBinaryFiles
+        ? `Binary files and files larger than ${config.security.maxContextFileBytes} bytes are quarantined from model context by default.`
+        : "Binary-file quarantine is disabled."
+    },
+    {
+      name: "write-scope",
+      status:
+        config.security.allowedWritePaths.length > 0 || config.security.requiredGitBranch
+          ? "ok"
+          : "warning",
+      message:
+        config.security.allowedWritePaths.length > 0 || config.security.requiredGitBranch
+          ? `Write-scope controls active (${config.security.allowedWritePaths.length} allowed path prefix(es)${config.security.requiredGitBranch ? `; branch ${config.security.requiredGitBranch}` : ""}).`
+          : "No write-scope or branch-isolation restrictions are configured yet."
     },
     {
       name: "test-allowlist",
@@ -185,15 +217,28 @@ export function buildRuntimeDoctorReport(cwd: string) {
     ...configReport.checks,
     {
       name: "task-store",
-      status: "ok" as const,
-      message: `SQLite task store schema v${storeInspection.schemaVersion} is ready at ${dbPath} (${storeInspection.taskCount} tasks, ${storeInspection.eventCount} events).`
+      status: storeInspection.auditChainIntact ? ("ok" as const) : ("warning" as const),
+      message: `SQLite task store schema v${storeInspection.schemaVersion} is ready at ${dbPath} (${storeInspection.taskCount} tasks, ${storeInspection.eventCount} events; audit chain ${storeInspection.auditChainIntact ? "intact" : "needs review"}).`
     },
     {
       name: "crash-reports",
       status: config.crashReporting.enabled ? "warning" as const : "ok" as const,
       message: config.crashReporting.enabled
-        ? `Crash reporting is enabled and ${crashReports.length} local report(s) are stored in ${config.crashReporting.directory}.`
+        ? `Crash reporting is enabled and ${crashReports.length} local report(s) are stored in ${config.crashReporting.directory} (limit ${config.crashReporting.maxLocalReports}).`
         : "Crash reporting is disabled."
+    },
+    {
+      name: "crash-upload-policy",
+      status:
+        config.crashReporting.endpoint && !config.crashReporting.allowRemoteUpload
+          ? "warning" as const
+          : "ok" as const,
+      message:
+        config.crashReporting.endpoint && !config.crashReporting.allowRemoteUpload
+          ? "A crash-report endpoint is configured, but remote upload is disabled until explicitly allowed."
+          : config.crashReporting.allowRemoteUpload
+            ? "Remote crash upload is explicitly enabled."
+            : "Remote crash upload is disabled."
     },
     {
       name: "package-manager",

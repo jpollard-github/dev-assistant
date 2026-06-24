@@ -4,7 +4,7 @@ Dev Assistant is a local-first multi-agent development assistant. The goal is to
 
 ## Current Status
 
-This repository is in Phase 12: packaging and distribution. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted routing with explicit opt-in, local repo/git/shell/test/memory capability servers, capability-backed advisory outputs for test writing, architecture review, and technical debt tracking, a real structured patch-application path with validation and final task reporting, a VS Code extension with task timeline and approvals, an eval package with benchmark fixtures/scoring/regression history, security controls for local-first use, a structured debt system with dedupe/lifecycle commands, repository privacy plus hosted cost estimation/reporting controls, packaging metadata/scripts for the CLI and extension, first-run diagnostics, and SQLite schema migration support.
+This repository is in Phase 13: advanced security hardening. The repo now includes a deterministic task runner, task lifecycle events, SQLite-backed task history, agent output schemas, prompt snapshots, an Ollama-backed structured-generation path for the fixed coordinator -> coder -> reviewer -> test-runner flow, optional hosted routing with explicit opt-in, local repo/git/shell/test/memory capability servers, capability-backed advisory outputs for test writing, architecture review, and technical debt tracking, a real structured patch-application path with validation and final task reporting, a VS Code extension with task timeline and approvals, an eval package with benchmark fixtures/scoring/regression history, structured debt lifecycle commands, repository privacy plus hosted cost estimation/reporting controls, packaging metadata/scripts for the CLI and extension, first-run diagnostics, SQLite schema migration support, opt-in crash reporting, hosted-routing secret preflight checks, explicit private-repo hosted acknowledgements, binary/large-file quarantine for model context, patch write-scope and branch-guard controls, tamper-evident task-event checksums, and shell policy controls for dependency installs and package scripts.
 
 Roadmap, phase progress, milestones, MVP definition of done, and project decisions now live in [TODO.md](/Users/jasonp/repos/dev-assistant/TODO.md).
 
@@ -20,12 +20,15 @@ Additional setup and usage guides:
 - Shell commands must be allowlisted in config before future agents can run them.
 - Shell network access is blocked unless the repo config explicitly enables it.
 - Sensitive repository paths such as `.env` and key material are blocked by default.
+- Large and binary files are quarantined from model context by default.
 - File edits and risky commands should require human approval.
 - Logs are structured so agent actions can be audited.
 - Logs redact common secret/token/private-key patterns before writing.
 - Local state lives in `.dev-assistant/`, which is ignored except for a placeholder file.
-- Phase 5 uses a real Ollama-backed model adapter, a real allowlisted shell/test execution path, capability-backed role prompts, and a controlled patch workflow that applies structured file operations inside the configured repo only.
-- Hosted or hybrid model routing now requires explicit opt-in before repository code can be sent off-machine.
+- Hosted or hybrid model routing requires explicit opt-in before repository code can be sent off-machine, and private repositories now require a per-run acknowledgement plus a secret preflight scan before hosted execution starts.
+- Patch application can be constrained to configured write scopes and a required git branch.
+- Task history now stores chained checksums so local audit trails are tamper-evident.
+- Crash reporting remains local-only by default, with retention caps and explicit upload controls in config.
 
 ## Workspace Layout
 
@@ -173,12 +176,20 @@ Create `dev-assistant.config.json` at the repository root when you want to overr
   "routing": {},
   "crashReporting": {
     "enabled": false,
-    "directory": ".dev-assistant/crash-reports"
+    "directory": ".dev-assistant/crash-reports",
+    "maxLocalReports": 20,
+    "allowRemoteUpload": false
   },
   "security": {
     "allowNetwork": false,
     "allowSecretAccess": false,
     "allowHostedCodeContext": false,
+    "allowDependencyInstalls": false,
+    "allowPackageScripts": true,
+    "blockBinaryFiles": true,
+    "maxContextFileBytes": 262144,
+    "allowedWritePaths": [],
+    "requiredGitBranch": "main",
     "redactLogs": true,
     "requireProvenanceComments": true,
     "panicFile": ".dev-assistant/panic.json",
@@ -221,12 +232,20 @@ Optional hybrid routing example:
   },
   "crashReporting": {
     "enabled": false,
-    "directory": ".dev-assistant/crash-reports"
+    "directory": ".dev-assistant/crash-reports",
+    "maxLocalReports": 20,
+    "allowRemoteUpload": false
   },
   "security": {
     "allowNetwork": true,
     "allowSecretAccess": false,
     "allowHostedCodeContext": true,
+    "allowDependencyInstalls": false,
+    "allowPackageScripts": true,
+    "blockBinaryFiles": true,
+    "maxContextFileBytes": 262144,
+    "allowedWritePaths": ["src", "test"],
+    "requiredGitBranch": "feature/dev-assistant",
     "redactLogs": true,
     "requireProvenanceComments": true,
     "panicFile": ".dev-assistant/panic.json",
@@ -245,7 +264,9 @@ Notes:
 - Commands like `run` and `review` still rely on the configured model provider.
 - `repositoryPrivacy` is a routing/safety hint for hosted review decisions and config-doctor warnings; it does not replace the explicit hosted opt-in controls.
 - Hosted cost estimates use the configured `hosted.pricing` rates and are shown before `run` and `review`, with actual returned token usage included in JSON/human summaries when providers report it.
-- Crash reporting is local-file-only and disabled by default. If enabled, reports are redacted and written under `crashReporting.directory`.
+- Private repositories in `hosted` or `hybrid` mode now require a per-run acknowledgement before code leaves the machine, even when config allows hosted context.
+- Crash reporting is local-file-only and disabled by default. If enabled, reports are redacted, retained under `crashReporting.directory`, and pruned to `crashReporting.maxLocalReports`.
+- `allowedWritePaths` and `requiredGitBranch` are optional hardening controls for constraining assistant edits.
 
 ## Development
 

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -16,7 +17,10 @@ interface TaskRow {
 }
 
 interface EventRow {
+  task_id?: string;
   event_json: string;
+  previous_event_hash?: string | null;
+  event_hash?: string | null;
 }
 
 interface TableColumnRow {
@@ -27,6 +31,7 @@ export interface TaskEventStoreInspection {
   readonly schemaVersion: number;
   readonly taskCount: number;
   readonly eventCount: number;
+  readonly auditChainIntact: boolean;
 }
 
 export interface TaskEventStore {
@@ -47,9 +52,12 @@ export class SqliteTaskEventStore implements TaskEventStore {
   }
 
   public append(event: TaskEvent): void {
+    const previousEventHash = this.getPreviousEventHash(event.taskId);
+    const serializedEvent = JSON.stringify(event);
+    const eventHash = hashEvent(previousEventHash, serializedEvent);
     const insertEvent = this.db.prepare(`
-      INSERT INTO task_events (id, task_id, event_type, created_at, event_json)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO task_events (id, task_id, event_type, created_at, event_json, previous_event_hash, event_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
     insertEvent.run(
@@ -57,7 +65,9 @@ export class SqliteTaskEventStore implements TaskEventStore {
       event.taskId,
       event.type,
       event.timestamp,
-      JSON.stringify(event)
+      serializedEvent,
+      previousEventHash,
+      eventHash
     );
 
     if (event.type === "task.created") {
@@ -138,6 +148,16 @@ export class SqliteTaskEventStore implements TaskEventStore {
   public close(): void {
     this.db.close();
   }
+
+  private getPreviousEventHash(taskId: string): string | null {
+    const row = this.db
+      .prepare(
+        "SELECT event_hash FROM task_events WHERE task_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1"
+      )
+      .get(taskId) as { event_hash?: string | null } | undefined;
+
+    return row?.event_hash ?? null;
+  }
 }
 
 export function inspectTaskEventStore(filename: string): TaskEventStoreInspection {
@@ -157,14 +177,15 @@ export function inspectTaskEventStore(filename: string): TaskEventStoreInspectio
     return {
       schemaVersion: Number((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version),
       taskCount,
-      eventCount
+      eventCount,
+      auditChainIntact: verifyAuditChain(db)
     };
   } finally {
     db.close();
   }
 }
 
-const CURRENT_TASK_STORE_SCHEMA_VERSION = 2;
+const CURRENT_TASK_STORE_SCHEMA_VERSION = 3;
 
 function migrateTaskEventStore(db: DatabaseSync): void {
   db.exec("PRAGMA journal_mode = WAL;");
@@ -179,6 +200,16 @@ function migrateTaskEventStore(db: DatabaseSync): void {
     db.exec("ALTER TABLE task_events ADD COLUMN event_type TEXT;");
     backfillEventTypes(db);
   }
+
+  if (!hasColumn(db, "task_events", "previous_event_hash")) {
+    db.exec("ALTER TABLE task_events ADD COLUMN previous_event_hash TEXT;");
+  }
+
+  if (!hasColumn(db, "task_events", "event_hash")) {
+    db.exec("ALTER TABLE task_events ADD COLUMN event_hash TEXT;");
+  }
+
+  backfillAuditHashes(db);
 
   createIndexes(db);
 
@@ -204,7 +235,9 @@ function ensureBaseTables(db: DatabaseSync): void {
       task_id TEXT NOT NULL,
       event_type TEXT,
       created_at TEXT NOT NULL,
-      event_json TEXT NOT NULL
+      event_json TEXT NOT NULL,
+      previous_event_hash TEXT,
+      event_hash TEXT
     );
   `);
 }
@@ -239,4 +272,54 @@ function backfillEventTypes(db: DatabaseSync): void {
 
     update.run(eventType, row.id);
   }
+}
+
+function backfillAuditHashes(db: DatabaseSync): void {
+  const rows = db
+    .prepare(
+      "SELECT id, task_id, event_json FROM task_events ORDER BY task_id ASC, created_at ASC, rowid ASC"
+    )
+    .all() as Array<{ id: string; task_id: string; event_json: string }>;
+  const update = db.prepare(
+    "UPDATE task_events SET previous_event_hash = ?, event_hash = ? WHERE id = ?"
+  );
+  const previousHashes = new Map<string, string | null>();
+
+  for (const row of rows) {
+    const previousEventHash = previousHashes.get(row.task_id) ?? null;
+    const eventHash = hashEvent(previousEventHash, row.event_json);
+    update.run(previousEventHash, eventHash, row.id);
+    previousHashes.set(row.task_id, eventHash);
+  }
+}
+
+function verifyAuditChain(db: DatabaseSync): boolean {
+  const rows = db
+    .prepare(
+      "SELECT task_id, event_json, previous_event_hash, event_hash FROM task_events ORDER BY task_id ASC, created_at ASC, rowid ASC"
+    )
+    .all() as unknown as Array<EventRow & { task_id: string }>;
+  const previousHashes = new Map<string, string | null>();
+
+  for (const row of rows) {
+    const previousEventHash = previousHashes.get(row.task_id) ?? null;
+    const expectedHash = hashEvent(previousEventHash, row.event_json);
+    if ((row.previous_event_hash ?? null) !== previousEventHash) {
+      return false;
+    }
+    if ((row.event_hash ?? null) !== expectedHash) {
+      return false;
+    }
+    previousHashes.set(row.task_id, expectedHash);
+  }
+
+  return true;
+}
+
+function hashEvent(previousEventHash: string | null, eventJson: string): string {
+  return createHash("sha256")
+    .update(previousEventHash ?? "")
+    .update("\n")
+    .update(eventJson)
+    .digest("hex");
 }

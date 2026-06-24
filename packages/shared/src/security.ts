@@ -7,6 +7,12 @@ export const securityConfigSchema = z
     allowNetwork: z.boolean().default(false),
     allowSecretAccess: z.boolean().default(false),
     allowHostedCodeContext: z.boolean().default(false),
+    allowDependencyInstalls: z.boolean().default(false),
+    allowPackageScripts: z.boolean().default(true),
+    blockBinaryFiles: z.boolean().default(true),
+    maxContextFileBytes: z.number().int().positive().default(262_144),
+    allowedWritePaths: z.array(z.string().min(1)).default([]),
+    requiredGitBranch: z.string().min(1).optional(),
     redactLogs: z.boolean().default(true),
     requireProvenanceComments: z.boolean().default(true),
     panicFile: z.string().min(1).default(".dev-assistant/panic.json"),
@@ -16,6 +22,11 @@ export const securityConfigSchema = z
     allowNetwork: false,
     allowSecretAccess: false,
     allowHostedCodeContext: false,
+    allowDependencyInstalls: false,
+    allowPackageScripts: true,
+    blockBinaryFiles: true,
+    maxContextFileBytes: 262_144,
+    allowedWritePaths: [],
     redactLogs: true,
     requireProvenanceComments: true,
     panicFile: ".dev-assistant/panic.json",
@@ -59,6 +70,17 @@ const NETWORK_COMMAND_PATTERNS = [
   /https?:\/\//i
 ] as const;
 
+const DEPENDENCY_INSTALL_COMMAND_PATTERNS = [
+  /(^|\s)(npm|pnpm|yarn|bun)\s+(install|add|dlx|create)\b/i,
+  /(^|\s)(pip|pip3|poetry)\s+(install|add)\b/i,
+  /(^|\s)(brew|apt|apt-get|yum|dnf|pacman)\s+(install|update|upgrade)\b/i
+] as const;
+
+const PACKAGE_SCRIPT_COMMAND_PATTERNS = [
+  /(^|\s)(npm)\s+run\b/i,
+  /(^|\s)(pnpm|yarn|bun)\s+(run\s+)?[A-Za-z0-9:_-]+\b/i
+] as const;
+
 export function isSensitivePath(path: string): boolean {
   return SECRET_PATH_PATTERNS.some((pattern) => pattern.test(path));
 }
@@ -95,6 +117,40 @@ export function redactString(value: string): string {
 
 export function containsLikelyNetworkCommand(command: string): boolean {
   return NETWORK_COMMAND_PATTERNS.some((pattern) => pattern.test(command));
+}
+
+export function containsLikelyDependencyInstallCommand(command: string): boolean {
+  return DEPENDENCY_INSTALL_COMMAND_PATTERNS.some((pattern) => pattern.test(command));
+}
+
+export function containsLikelyPackageScriptCommand(command: string): boolean {
+  return PACKAGE_SCRIPT_COMMAND_PATTERNS.some((pattern) => pattern.test(command));
+}
+
+export function findSecretLikeMatches(value: string): readonly string[] {
+  const matches = new Set<string>();
+
+  for (const pattern of SECRET_VALUE_PATTERNS) {
+    const globalPattern = new RegExp(pattern.source, pattern.flags);
+    for (const match of value.matchAll(globalPattern)) {
+      if (match[0]) {
+        matches.add(match[0].slice(0, 120));
+      }
+    }
+  }
+
+  return [...matches];
+}
+
+export function isLikelyBinaryContent(content: Uint8Array): boolean {
+  const sample = content.subarray(0, Math.min(content.length, 4_096));
+  for (const byte of sample) {
+    if (byte === 0) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function resolvePanicFilePath(

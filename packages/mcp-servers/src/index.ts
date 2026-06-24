@@ -8,7 +8,14 @@ import { DatabaseSync } from "node:sqlite";
 
 import type { ShellCommandResult, ShellRunner } from "@dev-assistant/core";
 import type { FileOperation } from "@dev-assistant/agents";
-import { containsLikelyNetworkCommand, isSensitivePath, redactString } from "@dev-assistant/shared";
+import {
+  containsLikelyDependencyInstallCommand,
+  containsLikelyNetworkCommand,
+  containsLikelyPackageScriptCommand,
+  isLikelyBinaryContent,
+  isSensitivePath,
+  redactString
+} from "@dev-assistant/shared";
 import {
   debtStoreSchema,
   debtItemInputSchema,
@@ -67,6 +74,8 @@ export interface RepoMcpServer {
 
 export interface RepoAccessPolicy {
   readonly allowSecretAccess: boolean;
+  readonly blockBinaryFiles: boolean;
+  readonly maxContextFileBytes: number;
 }
 
 export interface GitLogEntry {
@@ -87,6 +96,8 @@ export interface ShellExecutionPolicy {
   readonly timeoutMs: number;
   readonly maxOutputChars: number;
   readonly allowNetwork: boolean;
+  readonly allowDependencyInstalls: boolean;
+  readonly allowPackageScripts: boolean;
 }
 
 export interface ShellExecutionResult extends ShellCommandResult {
@@ -138,6 +149,24 @@ export interface TestRunSummary {
   readonly commandResults: readonly ShellExecutionResult[];
   readonly parsedResults: readonly ParsedTestOutput[];
   readonly passed: boolean;
+}
+
+export class QuarantinedFileAccessError extends Error {
+  public constructor(path: string, reason: string) {
+    super(`Access to "${path}" is quarantined from model context: ${reason}`);
+  }
+}
+
+export class DependencyInstallPolicyError extends Error {
+  public constructor(command: string) {
+    super(`Dependency installation command "${command}" is blocked by policy.`);
+  }
+}
+
+export class PackageScriptPolicyError extends Error {
+  public constructor(command: string) {
+    super(`Package-script command "${command}" is blocked by policy.`);
+  }
 }
 
 export interface TestMcpServer {
@@ -333,7 +362,9 @@ export function createRepoMcpServer(
 ): RepoMcpServer {
   const root = resolve(repoPath);
   const accessPolicy: RepoAccessPolicy = {
-    allowSecretAccess: policy.allowSecretAccess ?? false
+    allowSecretAccess: policy.allowSecretAccess ?? false,
+    blockBinaryFiles: policy.blockBinaryFiles ?? true,
+    maxContextFileBytes: policy.maxContextFileBytes ?? 262_144
   };
 
   return {
@@ -346,6 +377,7 @@ export function createRepoMcpServer(
       assertRepoPathAllowed(path, accessPolicy);
       const resolved = resolve(root, path);
       ensurePathInsideRepo(root, resolved);
+      await assertContextFileAllowed(root, resolved, accessPolicy);
       return readFile(resolved, "utf8");
     },
     async search(pattern) {
@@ -363,7 +395,8 @@ export function createRepoMcpServer(
         .split("\n")
         .filter((line) => line.trim().length > 0)
         .map(parseRipgrepLine)
-        .filter((match) => !isSensitivePath(match.path) || accessPolicy.allowSecretAccess);
+        .filter((match) => !isSensitivePath(match.path) || accessPolicy.allowSecretAccess)
+        .filter((match) => isRepoPathAllowedForContext(root, resolve(root, match.path), accessPolicy));
     },
     async inspectFileMetadata(path) {
       assertRepoPathAllowed(path, accessPolicy);
@@ -413,13 +446,17 @@ export function createShellMcpServer(params: {
   readonly timeoutMs?: number;
   readonly maxOutputChars?: number;
   readonly allowNetwork?: boolean;
+  readonly allowDependencyInstalls?: boolean;
+  readonly allowPackageScripts?: boolean;
   readonly safety?: ShellSafetyOptions;
 }): ShellMcpServer {
   const policy: ShellExecutionPolicy = {
     allowlist: params.allowlist,
     timeoutMs: params.timeoutMs ?? 30_000,
     maxOutputChars: params.maxOutputChars ?? 8_000,
-    allowNetwork: params.allowNetwork ?? false
+    allowNetwork: params.allowNetwork ?? false,
+    allowDependencyInstalls: params.allowDependencyInstalls ?? false,
+    allowPackageScripts: params.allowPackageScripts ?? true
   };
 
   return {
@@ -435,6 +472,14 @@ export function createShellMcpServer(params: {
 
       if (!policy.allowNetwork && containsLikelyNetworkCommand(command)) {
         throw new NetworkAccessDisabledError(command);
+      }
+
+      if (!policy.allowDependencyInstalls && containsLikelyDependencyInstallCommand(command)) {
+        throw new DependencyInstallPolicyError(command);
+      }
+
+      if (!policy.allowPackageScripts && containsLikelyPackageScriptCommand(command)) {
+        throw new PackageScriptPolicyError(command);
       }
 
       const startedAt = Date.now();
@@ -533,6 +578,8 @@ export function createPatchMcpServer(params: {
   readonly formatCommands?: readonly string[];
   readonly shellServer?: ShellMcpServer;
   readonly requireProvenanceComments?: boolean;
+  readonly allowedWritePaths?: readonly string[];
+  readonly requiredBranch?: string;
 }): PatchMcpServer {
   const repoPath = resolve(params.repoPath);
 
@@ -565,7 +612,18 @@ export function createPatchMcpServer(params: {
         };
       }
 
-      validatePatchOperations(repoPath, operations, declaredFiles);
+      validatePatchOperations(
+        repoPath,
+        operations,
+        declaredFiles,
+        withOptionalProperties(
+          {},
+          {
+            allowedWritePaths: params.allowedWritePaths,
+            requiredBranch: params.requiredBranch
+          }
+        )
+      );
 
       const summaryParts = [
         `Applying ${operations.length} operation(s) across ${operationPaths.length} file(s).`,
@@ -856,9 +914,22 @@ export function isPanicModeEnabled(panicFilePath: string): boolean {
 function validatePatchOperations(
   repoPath: string,
   operations: readonly FileOperation[],
-  declaredFiles: readonly string[]
+  declaredFiles: readonly string[],
+  constraints: {
+    readonly allowedWritePaths?: readonly string[];
+    readonly requiredBranch?: string;
+  }
 ): void {
   const seenPaths = new Set<string>();
+
+  if (constraints.requiredBranch) {
+    const currentBranch = readCurrentBranch(repoPath);
+    if (currentBranch !== constraints.requiredBranch) {
+      throw new Error(
+        `Patch proposal is blocked because the current branch "${currentBranch}" does not match required branch "${constraints.requiredBranch}".`
+      );
+    }
+  }
 
   for (const operation of operations) {
     const resolvedPath = resolve(repoPath, operation.path);
@@ -872,6 +943,19 @@ function validatePatchOperations(
     if (seenPaths.has(normalizedPath)) {
       throw new Error(`Patch proposal contains duplicate operations for ${normalizedPath}.`);
     }
+
+    if (
+      constraints.allowedWritePaths &&
+      constraints.allowedWritePaths.length > 0 &&
+      !constraints.allowedWritePaths.some(
+        (allowedPath) =>
+          normalizedPath === allowedPath ||
+          normalizedPath.startsWith(`${allowedPath.replace(/\/+$/, "")}/`)
+      )
+    ) {
+      throw new Error(`Patch proposal cannot modify ${normalizedPath} because it is outside the allowed write scope.`);
+    }
+
     seenPaths.add(normalizedPath);
   }
 
@@ -882,6 +966,14 @@ function validatePatchOperations(
       );
     }
   }
+}
+
+function withOptionalProperties<TBase extends object, TOptional extends Record<string, unknown>>(
+  base: TBase,
+  optional: TOptional
+): TBase & Partial<TOptional> {
+  const entries = Object.entries(optional).filter(([, value]) => value !== undefined);
+  return Object.assign(base, Object.fromEntries(entries)) as TBase & Partial<TOptional>;
 }
 
 async function walkFiles(
@@ -897,6 +989,9 @@ async function walkFiles(
     const fullPath = join(currentDir, entry.name);
     const relativePath = normalizeRepoRelative(root, fullPath);
     if (!policy.allowSecretAccess && isSensitivePath(relativePath)) {
+      continue;
+    }
+    if (!entry.isDirectory() && !isRepoPathAllowedForContext(root, fullPath, policy)) {
       continue;
     }
     records.push({
@@ -940,6 +1035,18 @@ function toShellExecutionResult(
     durationMs: Date.now() - startedAt,
     truncated: truncatedStdout.truncated || truncatedStderr.truncated
   };
+}
+
+function readCurrentBranch(repoPath: string): string {
+  try {
+    const head = readFileSync(join(repoPath, ".git", "HEAD"), "utf8").trim();
+    if (head.startsWith("ref: refs/heads/")) {
+      return head.replace("ref: refs/heads/", "");
+    }
+    return "HEAD";
+  } catch {
+    return "HEAD";
+  }
 }
 
 function truncateOutput(value: string, maxChars: number): { readonly value: string; readonly truncated: boolean } {
@@ -1108,6 +1215,50 @@ function debtStatusRank(status: string): number {
 function assertRepoPathAllowed(path: string, policy: RepoAccessPolicy): void {
   if (!policy.allowSecretAccess && isSensitivePath(path)) {
     throw new SecretAccessDeniedError(path);
+  }
+}
+
+async function assertContextFileAllowed(
+  root: string,
+  path: string,
+  policy: RepoAccessPolicy
+): Promise<void> {
+  const info = await stat(path);
+  if (info.size > policy.maxContextFileBytes) {
+    throw new QuarantinedFileAccessError(
+      normalizeRepoRelative(root, path),
+      `file exceeds ${policy.maxContextFileBytes} bytes`
+    );
+  }
+
+  if (!policy.blockBinaryFiles) {
+    return;
+  }
+
+  const content = await readFile(path);
+  if (isLikelyBinaryContent(content)) {
+    throw new QuarantinedFileAccessError(normalizeRepoRelative(root, path), "binary content detected");
+  }
+}
+
+function isRepoPathAllowedForContext(
+  root: string,
+  path: string,
+  policy: RepoAccessPolicy
+): boolean {
+  try {
+    const info = statSync(path);
+    if (info.size > policy.maxContextFileBytes) {
+      return false;
+    }
+
+    if (!policy.blockBinaryFiles) {
+      return true;
+    }
+
+    return !isLikelyBinaryContent(readFileSync(path));
+  } catch {
+    return false;
   }
 }
 

@@ -7,8 +7,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   AGENT_PERMISSION_PROFILES,
+  DependencyInstallPolicyError,
   NetworkAccessDisabledError,
   PanicModeEnabledError,
+  PackageScriptPolicyError,
+  QuarantinedFileAccessError,
   SecretAccessDeniedError,
   ShellCommandApprovalRequiredError,
   clearPanicMode,
@@ -45,6 +48,8 @@ function createFixtureRepo(): { readonly repoPath: string; readonly dataDir: str
   );
   writeFileSync(join(repoPath, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
   writeFileSync(join(repoPath, "src", "index.ts"), "export const value = 1;\n");
+  writeFileSync(join(repoPath, "src", "large.txt"), "x".repeat(300_000));
+  writeFileSync(join(repoPath, "src", "binary.bin"), Buffer.from([0, 159, 146, 150, 0]));
   writeFileSync(join(repoPath, ".env"), "OPENAI_API_KEY=super-secret\n");
   writeFileSync(join(repoPath, "README.md"), "# Fixture Repo\n");
   writeFileSync(join(dataDir, "debt.md"), "- [ ] follow up on flaky test\n");
@@ -96,6 +101,15 @@ describe("repo MCP server", () => {
     });
 
     await expect(server.readFile(".env")).resolves.toContain("OPENAI_API_KEY");
+  });
+
+  it("quarantines oversized and binary files from model context", async () => {
+    const server = createRepoMcpServer(repoPath);
+
+    await expect(server.readFile("src/large.txt")).rejects.toBeInstanceOf(QuarantinedFileAccessError);
+    await expect(server.readFile("src/binary.bin")).rejects.toBeInstanceOf(QuarantinedFileAccessError);
+    expect((await server.listFiles()).some((file) => file.path === "src/large.txt")).toBe(false);
+    expect((await server.listFiles()).some((file) => file.path === "src/binary.bin")).toBe(false);
   });
 });
 
@@ -181,6 +195,19 @@ describe("shell MCP server", () => {
     );
 
     clearPanicMode({ panicFilePath, processRegistryPath });
+  });
+
+  it("blocks dependency installs and package scripts when policy forbids them", async () => {
+    const server = createShellMcpServer({
+      repoPath,
+      allowlist: ["npm install lodash", "pnpm test"],
+      allowNetwork: true,
+      allowDependencyInstalls: false,
+      allowPackageScripts: false
+    });
+
+    await expect(server.run("npm install lodash")).rejects.toBeInstanceOf(DependencyInstallPolicyError);
+    await expect(server.run("pnpm test")).rejects.toBeInstanceOf(PackageScriptPolicyError);
   });
 });
 
@@ -389,6 +416,29 @@ describe("patch MCP server", () => {
         ]
       })
     ).rejects.toThrow(/reserved git metadata/i);
+  });
+
+  it("enforces write scopes and required branches when configured", async () => {
+    const server = createPatchMcpServer({
+      repoPath,
+      allowedWritePaths: ["src"],
+      requiredBranch: "main"
+    });
+
+    await expect(
+      server.applyProposal({
+        summary: "Try to edit outside scope",
+        diff: "",
+        files: [{ path: "README.md", changeType: "update" }],
+        operations: [
+          {
+            path: "README.md",
+            changeType: "update",
+            content: "# blocked\n"
+          }
+        ]
+      })
+    ).rejects.toThrow(/allowed write scope/i);
   });
 });
 

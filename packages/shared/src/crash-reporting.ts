@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -7,6 +7,8 @@ import { redactSecrets } from "./security.js";
 export interface CrashReportingConfig {
   readonly enabled: boolean;
   readonly directory: string;
+  readonly maxLocalReports: number;
+  readonly allowRemoteUpload: boolean;
   readonly endpoint?: string | undefined;
 }
 
@@ -63,6 +65,7 @@ export function writeLocalCrashReport(
   );
   const filename = resolve(directory, `${record.timestamp.replaceAll(":", "-")}-${record.id}.json`);
   writeFileSync(filename, JSON.stringify(record, null, 2).concat("\n"), "utf8");
+  pruneCrashReports(directory, config.crashReporting.maxLocalReports);
   return filename;
 }
 
@@ -105,4 +108,21 @@ function withOptionalProperties<TBase extends object, TOptional extends Record<s
   return Object.fromEntries(
     [...Object.entries(base), ...Object.entries(optional).filter(([, value]) => value !== undefined)]
   ) as TBase & Partial<TOptional>;
+}
+
+function pruneCrashReports(directory: string, maxLocalReports: number): void {
+  const reports = readdirSync(directory)
+    .filter((entry) => entry.endsWith(".json"))
+    .sort();
+
+  const overflow = reports.length - maxLocalReports;
+  if (overflow <= 0) {
+    return;
+  }
+
+  for (const entry of reports.slice(0, overflow)) {
+    try {
+      rmSync(resolve(directory, entry), { force: true });
+    } catch {}
+  }
 }

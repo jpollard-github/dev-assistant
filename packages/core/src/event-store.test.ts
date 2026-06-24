@@ -42,8 +42,9 @@ describe("SqliteTaskEventStore migrations", () => {
     store.close();
 
     const inspection = inspectTaskEventStore(dbPath);
-    expect(inspection.schemaVersion).toBe(2);
+    expect(inspection.schemaVersion).toBe(3);
     expect(inspection.eventCount).toBe(1);
+    expect(inspection.auditChainIntact).toBe(true);
 
     const verifyDb = new DatabaseSync(dbPath);
     const row = verifyDb

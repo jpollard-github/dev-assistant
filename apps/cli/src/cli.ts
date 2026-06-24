@@ -38,6 +38,7 @@ import {
   ensureDataDir,
   estimateHostedCostForWorkflow,
   estimateHostedUsageCost,
+  scanRepositoryForHostedSecrets,
   loadAssistantConfig,
   writeLocalCrashReport,
   resolveHostedModelName,
@@ -107,6 +108,12 @@ interface TestResultSummary {
   readonly packageManager: string;
   readonly commandCount: number;
   readonly summary: AgentOutputMap["test-runner"];
+}
+
+interface HostedRoutingPreflight {
+  readonly workflow: "run" | "review";
+  readonly hostedRoles: readonly string[];
+  readonly requiresPrivateRepoAcknowledgement: boolean;
 }
 
 export async function main(argv: readonly string[]): Promise<void> {
@@ -252,6 +259,12 @@ async function handleRun(args: string[]): Promise<void> {
     throw new Error('Usage: dev-assistant run "task description" [--approve] [--dry-run] [--json]');
   }
 
+  const preflightConfig = loadAssistantConfig();
+  await enforceHostedRoutingPreflight(
+    buildHostedRoutingPreflight(preflightConfig, resolveRepoPath(preflightConfig), "run"),
+    flags
+  );
+
   const context = createModelCommandContext(flags.json);
   const costEstimate = estimateHostedCostForWorkflow(context.config, "run");
   assertEstimatedCostAllowed(context.config, costEstimate);
@@ -347,6 +360,11 @@ async function handleRun(args: string[]): Promise<void> {
 
 async function handleReview(args: string[]): Promise<void> {
   const { flags } = parseCommonFlags(args);
+  const preflightConfig = loadAssistantConfig();
+  await enforceHostedRoutingPreflight(
+    buildHostedRoutingPreflight(preflightConfig, resolveRepoPath(preflightConfig), "review"),
+    flags
+  );
   const context = createModelCommandContext(flags.json);
   const costEstimate = estimateHostedCostForWorkflow(context.config, "review");
   assertEstimatedCostAllowed(context.config, costEstimate);
@@ -600,13 +618,17 @@ function createBaseCommandContext(
   }
   const store = new SqliteTaskEventStore(join(dataDir, "tasks.sqlite"));
   const repoServer = createRepoMcpServer(repoPath, {
-    allowSecretAccess: config.security.allowSecretAccess
+    allowSecretAccess: config.security.allowSecretAccess,
+    blockBinaryFiles: config.security.blockBinaryFiles,
+    maxContextFileBytes: config.security.maxContextFileBytes
   });
   const gitServer = createGitMcpServer(repoPath);
   const shellServer = createShellMcpServer({
     repoPath,
     allowlist: config.allowedShellCommands,
     allowNetwork: config.security.allowNetwork,
+    allowDependencyInstalls: config.security.allowDependencyInstalls,
+    allowPackageScripts: config.security.allowPackageScripts,
     safety: {
       panicFilePath: resolvePanicFilePath(config),
       processRegistryPath: resolveProcessRegistryPath(config)
@@ -620,7 +642,11 @@ function createBaseCommandContext(
     repoPath,
     formatCommands: config.formatCommands,
     shellServer,
-    requireProvenanceComments: config.security.requireProvenanceComments
+    requireProvenanceComments: config.security.requireProvenanceComments,
+    allowedWritePaths: config.security.allowedWritePaths,
+    ...(config.security.requiredGitBranch
+      ? { requiredBranch: config.security.requiredGitBranch }
+      : {})
   });
   const memoryServer = createMemoryMcpServer({
     repoPath,
@@ -651,7 +677,9 @@ function createModelCommandContext(jsonMode: boolean): ModelCommandContext {
   const base = createBaseCommandContext(jsonMode);
   const providerForRole = createProviderResolver(base.config);
   const repoServer = createRepoMcpServer(base.repoPath, {
-    allowSecretAccess: base.config.security.allowSecretAccess
+    allowSecretAccess: base.config.security.allowSecretAccess,
+    blockBinaryFiles: base.config.security.blockBinaryFiles,
+    maxContextFileBytes: base.config.security.maxContextFileBytes
   });
   const gitServer = createGitMcpServer(base.repoPath);
   const agents = createCapabilityBackedAgentHandlers({
@@ -1021,6 +1049,69 @@ function requireHostedApiKey(envVarName: string): string {
   }
 
   return apiKey;
+}
+
+function buildHostedRoutingPreflight(
+  config: AssistantConfig,
+  repoPath: string,
+  workflow: "run" | "review"
+): HostedRoutingPreflight {
+  const estimate = estimateHostedCostForWorkflow(config, workflow);
+  if (estimate.lineItems.length === 0) {
+    return {
+      workflow,
+      hostedRoles: [],
+      requiresPrivateRepoAcknowledgement: false
+    };
+  }
+
+  const findings = scanRepositoryForHostedSecrets(repoPath, {
+    maxFileBytes: config.security.maxContextFileBytes,
+    maxFindings: 5
+  });
+  if (findings.length > 0) {
+    throw new Error(
+      `Hosted routing blocked by preflight secret scan. Findings: ${findings.map((finding) => `${finding.path} (${finding.reason})`).join("; ")}`
+    );
+  }
+
+  return {
+    workflow,
+    hostedRoles: estimate.lineItems.map((item) => item.role),
+    requiresPrivateRepoAcknowledgement:
+      config.repositoryPrivacy === "private" && estimate.lineItems.length > 0
+  };
+}
+
+async function enforceHostedRoutingPreflight(
+  preflight: HostedRoutingPreflight,
+  flags: RunFlags | CommandFlags
+): Promise<void> {
+  if (!preflight.requiresPrivateRepoAcknowledgement) {
+    return;
+  }
+
+  if ("approve" in flags && flags.approve) {
+    return;
+  }
+
+  if (!stdin.isTTY || !stdout.isTTY) {
+    throw new Error(
+      `Private-repository hosted routing for ${preflight.workflow} requires interactive acknowledgement or --approve. Hosted roles: ${preflight.hostedRoles.join(", ")}.`
+    );
+  }
+
+  const rl = createInterface({ input: stdin, output: stdout });
+  try {
+    const answer = await rl.question(
+      `This ${preflight.workflow} routes private repository context to hosted roles (${preflight.hostedRoles.join(", ")}). Continue? [y/N] `
+    );
+    if (!/^y(es)?$/i.test(answer.trim())) {
+      throw new Error("Hosted routing cancelled because private-repository acknowledgement was denied.");
+    }
+  } finally {
+    rl.close();
+  }
 }
 
 function assertEstimatedCostAllowed(config: AssistantConfig, estimate: HostedCostEstimate): void {

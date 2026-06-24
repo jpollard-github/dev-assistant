@@ -106,6 +106,10 @@ class DevAssistantExtension {
       return;
     }
 
+    if (!(await this.confirmHostedRouting("run"))) {
+      return;
+    }
+
     const prompt = await vscode.window.showInputBox({
       title: "Start Assistant Task",
       prompt: "Describe the task you want the assistant to handle.",
@@ -165,6 +169,10 @@ class DevAssistantExtension {
 
   private async reviewCurrentDiff(): Promise<void> {
     if (!this.ensureTrusted()) {
+      return;
+    }
+
+    if (!(await this.confirmHostedRouting("review"))) {
       return;
     }
 
@@ -262,6 +270,21 @@ class DevAssistantExtension {
       updatedAt: task.updatedAt,
       events: history.eventsByTaskId[task.id] ?? []
     })));
+  }
+
+  private async confirmHostedRouting(workflow: "run" | "review"): Promise<boolean> {
+    const preflight = this.service.getHostedRoutingPreflight(workflow);
+    if (!preflight.requiresPrivateRepoAcknowledgement) {
+      return true;
+    }
+
+    const selection = await vscode.window.showWarningMessage(
+      `This ${workflow} routes private repository context to hosted roles: ${preflight.hostedRoles.join(", ")}.`,
+      { modal: true },
+      "Continue"
+    );
+
+    return selection === "Continue";
   }
 
   private async cancelTask(taskId?: string): Promise<void> {

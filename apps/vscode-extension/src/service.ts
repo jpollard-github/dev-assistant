@@ -26,11 +26,13 @@ import {
 import {
   ensureDataDir,
   loadAssistantConfig,
+  scanRepositoryForHostedSecrets,
   resolveHostedModelName,
   resolveHostedProviderName,
   resolvePanicFilePath,
   resolveProcessRegistryPath,
   resolveRepoPath,
+  estimateHostedCostForWorkflow,
   resolveRoleRouteTarget,
   type RoutedAssistantRole,
   type AssistantConfig
@@ -64,6 +66,12 @@ export interface TechnicalDebtSummary {
   readonly diffFiles: readonly string[];
 }
 
+export interface HostedRoutingPreflight {
+  readonly workflow: "run" | "review";
+  readonly hostedRoles: readonly string[];
+  readonly requiresPrivateRepoAcknowledgement: boolean;
+}
+
 export class LocalWorkspaceService {
   public constructor(private readonly workspacePath: string) {}
 
@@ -82,6 +90,37 @@ export class LocalWorkspaceService {
     } finally {
       store.close();
     }
+  }
+
+  public getHostedRoutingPreflight(workflow: "run" | "review"): HostedRoutingPreflight {
+    const config = loadAssistantConfig(this.workspacePath);
+    const repoPath = resolveRepoPath(config, this.workspacePath);
+    const estimate = estimateHostedCostForWorkflow(config, workflow);
+
+    if (estimate.lineItems.length === 0) {
+      return {
+        workflow,
+        hostedRoles: [],
+        requiresPrivateRepoAcknowledgement: false
+      };
+    }
+
+    const findings = scanRepositoryForHostedSecrets(repoPath, {
+      maxFileBytes: config.security.maxContextFileBytes,
+      maxFindings: 5
+    });
+    if (findings.length > 0) {
+      throw new Error(
+        `Hosted routing blocked by preflight secret scan. Findings: ${findings.map((finding) => `${finding.path} (${finding.reason})`).join("; ")}`
+      );
+    }
+
+    return {
+      workflow,
+      hostedRoles: estimate.lineItems.map((item) => item.role),
+      requiresPrivateRepoAcknowledgement:
+        config.repositoryPrivacy === "private" && estimate.lineItems.length > 0
+    };
   }
 
   public startTask(options: StartTaskOptions): Promise<TaskRunResult> {
@@ -294,13 +333,17 @@ export class LocalWorkspaceService {
     }
     const store = new SqliteTaskEventStore(join(dataDir, "tasks.sqlite"));
     const repoServer = createRepoMcpServer(repoPath, {
-      allowSecretAccess: config.security.allowSecretAccess
+      allowSecretAccess: config.security.allowSecretAccess,
+      blockBinaryFiles: config.security.blockBinaryFiles,
+      maxContextFileBytes: config.security.maxContextFileBytes
     });
     const gitServer = createGitMcpServer(repoPath);
     const shellServer = createShellMcpServer({
       repoPath,
       allowlist: config.allowedShellCommands,
       allowNetwork: config.security.allowNetwork,
+      allowDependencyInstalls: config.security.allowDependencyInstalls,
+      allowPackageScripts: config.security.allowPackageScripts,
       safety: {
         panicFilePath: resolvePanicFilePath(config, this.workspacePath),
         processRegistryPath: resolveProcessRegistryPath(config, this.workspacePath)
@@ -314,7 +357,11 @@ export class LocalWorkspaceService {
       repoPath,
       formatCommands: config.formatCommands,
       shellServer,
-      requireProvenanceComments: config.security.requireProvenanceComments
+      requireProvenanceComments: config.security.requireProvenanceComments,
+      allowedWritePaths: config.security.allowedWritePaths,
+      ...(config.security.requiredGitBranch
+        ? { requiredBranch: config.security.requiredGitBranch }
+        : {})
     });
     const memoryServer = createMemoryMcpServer({
       repoPath,

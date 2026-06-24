@@ -13,11 +13,15 @@ export const crashReportingConfigSchema = z
   .object({
     enabled: z.boolean().default(false),
     directory: z.string().min(1).default(".dev-assistant/crash-reports"),
+    maxLocalReports: z.number().int().positive().default(20),
+    allowRemoteUpload: z.boolean().default(false),
     endpoint: z.string().url().optional()
   })
   .default({
     enabled: false,
-    directory: ".dev-assistant/crash-reports"
+    directory: ".dev-assistant/crash-reports",
+    maxLocalReports: 20,
+    allowRemoteUpload: false
   });
 
 export const approvalPolicySchema = z.enum(["always", "on-risky-action", "never"]);

@@ -10,7 +10,7 @@ This file is the planning source of truth for the repository.
 
 ## Current Status
 
-Current phase: Phase 12 complete, with Phase 4 follow-up items still open.
+Current phase: Phase 13 substantially complete, with Phase 4 follow-up items and two deeper Phase 13 hardening items still open.
 
 What is implemented today:
 
@@ -32,12 +32,15 @@ What is implemented today:
 - Phase 10 now includes a structured debt item schema, duplicate detection, auto-created debt candidates from reviewer and architecture findings, noisy-item confirmation, aging/severity sorting, and CLI commands to list, resolve, defer, and export debt items.
 - Phase 11 now includes repository privacy settings, role-specific local/hosted routing defaults and overrides, hosted cost estimation before runs, actual token-usage/cost reporting in CLI outputs, and mirrored routing support in the VS Code extension.
 - Phase 12 now includes distributable CLI and VS Code packaging metadata/scripts, install and workflow docs, a first-run `doctor` command, SQLite schema migration support, and opt-in local crash reporting.
+- Phase 13 now includes hosted-routing secret preflight scans, explicit per-run acknowledgement for private repositories before hosted routing, crash-report retention and upload controls, binary/large-file quarantine for agent context, write-scope and branch-guard controls for patch application, tamper-evident task-event checksums, and shell policy controls for dependency installs and package scripts.
 
 What that means for MVP:
 
 - The project has crossed into an early MVP-capable state for small, low-risk tasks in both the CLI and VS Code.
 - The biggest remaining unlocks are better reviewer precision in live runs and real test-writing/edit application.
-- Security posture is now materially stronger for local-first use, and Phase 12 adds safer distribution/diagnostics defaults plus opt-in crash capture, but deeper isolation and secret-scanning follow-ups still remain for later phases.
+- Security posture is now materially stronger for local-first and hybrid use, with preflight hosted-export checks and tamper-evident local task history now in place.
+- The biggest remaining security gaps are disposable execution isolation for test/format flows, stronger supply-chain signing for release artifacts, and the still-open Phase 4 reviewer/test-writer quality work.
+- Recommendation: start supervised internal usage now from both the CLI and VS Code extension for small, reviewable tasks in trusted TypeScript repositories, but do not yet treat the reviewer or test-writer as a release gate.
 
 ## Implemented Decisions
 
@@ -363,15 +366,25 @@ This phase replaces the current no-op patch applier with a real, controlled patc
 
 ## Phase 13: Advanced Security Hardening
 
-- [ ] Add preflight secret scanning before any hosted code export.
-- [ ] Require an explicit per-run acknowledgement before private-repo code is routed to hosted providers, even when config allows it.
-- [ ] Add retention limits and explicit upload controls for crash reports before any remote crash endpoint is supported.
-- [ ] Add binary-file and large-file quarantine rules for agent context gathering.
+- [x] Add preflight secret scanning before any hosted code export.
+- [x] Require an explicit per-run acknowledgement before private-repo code is routed to hosted providers, even when config allows it.
+- [x] Add retention limits and explicit upload controls for crash reports before any remote crash endpoint is supported.
+- [x] Add binary-file and large-file quarantine rules for agent context gathering.
 - [ ] Isolate test and format commands in disposable sandboxes or temp clones where possible.
-- [ ] Add per-file write scopes and branch isolation for assistant edits.
-- [ ] Add tamper-evident audit log signing or checksums.
-- [ ] Add policy controls for dependency installation and package-script execution.
+- [x] Add per-file write scopes for assistant edits.
+- [x] Add required-branch guards for assistant edits.
+- [x] Add tamper-evident audit log checksums.
+- [x] Add policy controls for dependency installation and package-script execution.
+- [ ] Add true branch isolation or temp-clone execution for assistant edits.
 - [ ] Add signed packaging and release verification for CLI and VS Code extension artifacts.
+
+## Phase 14: Operational Security And Supply Chain
+
+- [ ] Add release signing and verification workflows for published CLI tarballs and VS Code VSIX artifacts.
+- [ ] Add dependency-vulnerability and lockfile-integrity checks to `doctor` or release validation.
+- [ ] Add suspicious-file or prompt-injection heuristics for repository context selection.
+- [ ] Add filesystem-permission checks for config, state, and crash-report directories on multi-user machines.
+- [ ] Add exportable policy/audit attestations for hosted-routing acknowledgements and patch approvals.
 
 ## Phase 10: Technical Debt Tracking
 
@@ -498,6 +511,7 @@ Cost drivers:
 - [x] Cap patch size.
 - [ ] Run narrow tests before full suites.
 - [x] Estimate cost before hosted calls.
+- [x] Require explicit acknowledgement before private repos can route code to hosted providers.
 - [ ] Store per-task cost and runtime metrics.
 - [x] Add a "local-only" mode that hard-blocks hosted providers.
 
@@ -523,7 +537,38 @@ Cost drivers:
 - [x] Prefer deterministic orchestration over open-ended agent chats.
 - [x] Add permissions per agent.
 - [x] Separate recommendations from automatic actions.
+- [x] Preflight-scan repositories for secret-like content before hosted routing.
+- [x] Quarantine binary and oversized files from model context gathering.
+- [x] Restrict assistant edits to configured write scopes and branch guards.
+- [x] Keep local task-event history tamper-evident with checksums.
 - [x] Measure usefulness, not just model fluency.
+
+## Risk Review Snapshot
+
+- Local models may produce plausible but incorrect code.
+  Status: Partially met.
+  Reason: approvals, tests, evals, and deterministic orchestration reduce damage, but the reviewer/test-writer quality bar is not yet high enough to trust unattended results.
+- Multi-agent loops can amplify mistakes if agents trust each other too much.
+  Status: Mostly met for the current product shape.
+  Reason: the workflow remains deterministic and fixed-sequence, which avoids the worst loop behavior; revisit this risk before any dynamic-role rollout.
+- Prompt injection from repository content can manipulate tool use.
+  Status: Partially met.
+  Reason: untrusted-content guidance, repo boundaries, secret blocking, and hosted preflight exist, but suspicious-text heuristics and stronger execution isolation are still missing.
+- Shell command execution can be dangerous without strict policies.
+  Status: Partially met.
+  Reason: allowlists, network controls, package-script/dependency-install policy, and panic mode exist, but commands still execute on the host and temp-clone/disposable isolation is still open.
+- VS Code UX can become noisy if every agent emits too much detail.
+  Status: Partially met.
+  Reason: the extension is usable, but real daily-use trials should drive event compression, wording cleanup, and approval UX tuning.
+- Technical debt tracking can become a junk drawer unless deduplicated and prioritized.
+  Status: Mostly met.
+  Reason: schema, dedupe, confirmation, and lifecycle commands are implemented; the remaining work is quality tuning and optional external sync.
+- Architecture review can sound impressive while being too generic.
+  Status: Partially met.
+  Reason: the advisory role exists, but it still needs live usefulness scoring in real repositories.
+- Maintaining compatibility across many repo types can become a large support burden.
+  Status: Not yet met.
+  Reason: the product needs explicit pilot coverage across at least three real TypeScript repositories plus a compatibility matrix before this risk is considered under control.
 
 ## Suggested First Milestone
 
@@ -595,6 +640,93 @@ Add:
 - [x] Local runtime setup and example workflow docs.
 - [x] Crash reporting that stays opt-in.
 
+## Suggested Seventh Milestone
+
+Add:
+
+- [x] Hosted-routing secret preflight scanning.
+- [x] Private-repo hosted acknowledgement prompts in CLI and VS Code.
+- [x] Crash-report retention caps and explicit upload policy controls.
+- [x] Binary and oversized file quarantine for repo context.
+- [x] Assistant write scopes and required-branch patch guards.
+- [x] Tamper-evident task-event checksums.
+- [x] Dependency-install and package-script shell policy controls.
+- [ ] Disposable temp-clone or sandbox execution for test and format commands.
+- [ ] Signed release verification for packaged artifacts.
+
+## Phase 15: MVP Closure And Internal Adoption
+
+This phase consolidates every still-open item from prior phases, milestones, cost controls, and MVP criteria into one go/no-go plan for daily CLI and VS Code usage.
+
+- [ ] Validate the assistant on at least three real TypeScript repositories.
+  Status: MVP blocker.
+  Prerequisites: choose pilot repos, keep configs checked in or documented, capture run logs and outcome notes.
+  Notes: this closes the open MVP item and is the main compatibility-risk reducer.
+- [ ] Make reviewer findings reliably actionable, including file-and-line references and fewer generic comments.
+  Status: MVP blocker.
+  Prerequisites: prompt tuning, citation-format enforcement, eval expansion for seeded review failures, live-run trace review.
+  Notes: consolidates the remaining Phase 4 reviewer work and the open MVP review-quality item.
+- [ ] Enable the Test Writer to author and apply focused tests for simple changes.
+  Status: MVP blocker.
+  Prerequisites: reuse the existing patch workflow, define test-writer write permissions, add evals for authored tests, verify narrow test execution.
+  Notes: consolidates the remaining Phase 4 test-writer work and the open MVP test-authoring item.
+- [ ] Add narrow-test planning before full-suite execution where possible.
+  Status: Strong MVP improvement.
+  Prerequisites: file-to-test heuristics, repo-specific test mapping, CLI/VSIX surfacing for the selected narrow scope.
+  Notes: closes an open cost-control item and reduces runtime/cost for daily use.
+- [ ] Limit model context to files proven relevant by search, diff, or user selection.
+  Status: Strong MVP improvement.
+  Prerequisites: context-ranking logic, prompt/context plumbing, eval checks for missed context.
+  Notes: closes an open cost-control item and helps both quality and cost.
+- [ ] Store per-task cost and runtime metrics in local state and surface them in CLI/VSIX history.
+  Status: Strong MVP improvement.
+  Prerequisites: task-store schema extension, report formatting, JSON output updates.
+  Notes: closes the open cost-control item and gives us operational feedback for pilots.
+- [ ] Cache repository summaries or other reusable repo-level context.
+  Status: Future optimization, not required for MVP.
+  Prerequisites: invalidation strategy, repo-fingerprint logic, summary quality checks.
+  Notes: keep this behind real pilot evidence so we do not add stale-context bugs too early.
+- [ ] Add disposable sandbox or temp-clone isolation for test and format commands.
+  Status: Post-MVP security hardening unless pilot usage requires it sooner.
+  Prerequisites: clone/worktree strategy, temp-state cleanup, command path remapping, Windows/macOS/Linux validation.
+  Notes: consolidates the open Phase 13 and Seventh Milestone execution-isolation items.
+- [ ] Add true branch isolation or temp-clone execution for assistant edits.
+  Status: Post-MVP security hardening unless pilot usage requires it sooner.
+  Prerequisites: worktree or temp-clone flow, patch/apply plumbing, approval UX updates.
+  Notes: keep paired with the execution-isolation item above so the product has one coherent isolation model.
+- [ ] Add signed packaging and release verification for CLI and VS Code artifacts.
+  Status: Post-MVP distribution hardening.
+  Prerequisites: signing identity choice, packaging pipeline changes, verification docs, release checklist.
+  Notes: consolidates the open Phase 13, Phase 14, and Seventh Milestone artifact-signing items.
+- [ ] Add dependency-vulnerability and lockfile-integrity checks to `doctor` or release validation.
+  Status: Post-MVP operational hardening.
+  Prerequisites: tool choice, offline/online behavior decision, false-positive policy.
+  Notes: good candidate to pair with signed release verification.
+- [ ] Add suspicious-file and prompt-injection heuristics for repository context selection.
+  Status: Post-MVP security hardening.
+  Prerequisites: heuristic design, quarantine UX, eval fixtures for malicious content.
+  Notes: this is the next meaningful improvement after the current secret-path and binary/large-file controls.
+- [ ] Add filesystem-permission checks for config, state, and crash-report directories on multi-user machines.
+  Status: Future hardening.
+  Prerequisites: cross-platform permission inspection, warning UX, docs.
+  Notes: useful for broader adoption, but not needed for single-user MVP.
+- [ ] Add exportable policy and audit attestations for hosted-routing acknowledgements and patch approvals.
+  Status: Future enterprise-facing hardening.
+  Prerequisites: attestation format, signing/integrity strategy, history export UX.
+  Notes: not needed for the first MVP.
+- [ ] Decide whether advanced budget overrides should be exposed in config.
+  Status: Future product tuning, not required for MVP.
+  Prerequisites: pilot feedback showing real need, schema design, doctor/docs updates.
+  Notes: the current orchestration-owned defaults remain the right default until power-user demand is clearer.
+- [ ] Decide whether dynamic role selection should be introduced.
+  Status: Future optimization, not required for MVP.
+  Prerequisites: enough real traces, role-level win/loss data, routing-quality evals.
+  Notes: keep the fixed sequence until the current roles are clearly useful.
+- [ ] Decide whether debt sync to GitHub Issues should be added.
+  Status: Future integration, not required for MVP.
+  Prerequisites: issue schema mapping, auth flow, duplicate sync strategy, user demand.
+  Notes: preserve the current local-first debt flow as the baseline.
+
 ## Definition Of Done For MVP
 
 - [ ] Can run against at least three real TypeScript repositories.
@@ -607,4 +739,69 @@ Add:
 - [x] Has clear logs for every agent decision and tool call.
 - [x] Has basic evals that catch regressions.
 - [x] Has baseline security controls for secrets, network use, provenance, and panic shutdown.
+- [x] Warns before private repository code is routed to hosted providers.
+- [x] Preserves tamper-evident local task history.
 - [x] Has documentation good enough for another developer to install and try it.
+
+## MVP Completion Plan
+
+The fastest credible path to MVP and early daily usage is:
+
+1. Close the remaining reviewer-quality work.
+2. Close the remaining test-writer implementation work.
+3. Run structured pilots on at least three real TypeScript repositories from both the CLI and VS Code extension.
+4. Use the pilot results to tune context selection, narrow-test execution, and UX noise.
+5. Only then decide whether post-MVP isolation/signing work must be pulled forward for your actual usage pattern.
+
+Practical go/no-go recommendation:
+
+- CLI: ready for supervised internal use now on small, low-risk tasks.
+- VS Code extension: ready for supervised internal use now on small, low-risk tasks.
+- Broad MVP sign-off: not yet, until the three open MVP checklist items are closed.
+
+## Pilot Validation Program
+
+Use this program to generate the next round of issues and decide whether Phase 15 is truly complete.
+
+Automatic validation to add or expand:
+
+- [ ] Reviewer evals that require exact file-and-line citations.
+- [ ] Test-writer evals that require authored tests to be applied and to pass.
+- [ ] Real-repo regression fixtures derived from the first three pilot repositories.
+- [ ] Context-selection evals that penalize irrelevant file stuffing and reward search-grounded context.
+- [ ] Cost-and-runtime regression checks for common `run`, `review`, and `test` flows.
+- [ ] Malicious-repo fixtures for prompt injection, hidden secrets, large files, and dangerous package scripts.
+- [ ] CLI/VSIX golden-output tests for approval prompts, hosted-routing warnings, and failure summaries.
+
+Manual validation to run:
+
+- [ ] End-to-end bug-fix task in three real TypeScript repositories from the CLI.
+- [ ] End-to-end bug-fix task in the same repositories from the VS Code extension.
+- [ ] Review-only flow where seeded defects should be caught and cited precisely.
+- [ ] Test-authoring flow where the assistant must add focused tests without broad churn.
+- [ ] Repo onboarding flow on different layouts: pnpm monorepo, npm single-package app, and mixed test frameworks.
+- [ ] Hosted/hybrid confirmation flow in a private repository with intentionally placed secret-like files.
+- [ ] Recovery flow after cancelled tasks, failed tests, and partially applied patches.
+
+## TODO Part 2: Tentative Enhancements
+
+These are useful next-step enhancements once MVP closure work is underway or complete.
+
+- [ ] Add a compatibility matrix documenting known-good repo shapes, package managers, test frameworks, and operating systems.
+- [ ] Add first-class onboarding presets for common repo types so `init` and `doctor` can suggest better defaults.
+- [ ] Add richer task-history browsing and filtering in the VS Code extension.
+- [ ] Add side-by-side run/review comparisons across local and hosted routing strategies.
+- [ ] Add a “safe mode” preset that forces local-only, read-only, and no package scripts for especially sensitive repos.
+- [ ] Add better summarization of why a command, edit, or hosted export was blocked.
+- [ ] Add guided repair suggestions when `doctor` finds missing runtimes, misconfigured routes, or risky config.
+- [ ] Add import/export for local debt, history summaries, and pilot reports.
+- [ ] Add optional repository profiles so users can store different policies for different repos.
+- [ ] Add a small sample repo pack specifically for manual onboarding and demo validation.
+
+Ideas that should produce future TODO items or new phases after testing:
+
+- [ ] Compare pilot results across multiple local models to decide whether the example default model should change.
+- [ ] Track where users override or ignore reviewer advice; use that to create reviewer-quality phases.
+- [ ] Track where test-writer output is rejected; use that to create test-authoring quality phases.
+- [ ] Track which approval prompts confuse users; use that to create VS Code/CLI UX cleanup phases.
+- [ ] Track which repo structures fail onboarding; use that to create compatibility and preset phases.
