@@ -30,6 +30,11 @@ declare module "vscode" {
     public constructor(id: string);
   }
 
+  export class MarkdownString {
+    public constructor(value?: string, supportThemeIcons?: boolean);
+    public appendMarkdown(value: string): MarkdownString;
+  }
+
   export enum TreeItemCollapsibleState {
     None = 0,
     Collapsed = 1,
@@ -39,7 +44,7 @@ declare module "vscode" {
   export class TreeItem {
     public label?: string;
     public description?: string;
-    public tooltip?: string;
+    public tooltip?: string | MarkdownString;
     public iconPath?: ThemeIcon;
     public contextValue?: string;
     public command?: Command;

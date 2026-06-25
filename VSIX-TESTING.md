@@ -262,6 +262,9 @@ Open these three folders, one at a time or in separate windows:
 ### Basic extension health
 
 - Verify the sidebar loads.
+- Verify the empty-state actions render vertically and remain readable in a narrow sidebar.
+- Verify the `Quick Actions` section appears above active tasks once a task starts.
+- Verify active task rows show concise status text and the event timeline reads cleanly without needing wide sidebar space.
 - Verify workspace trust gating behaves correctly.
 - Verify the extension activates without obvious startup errors.
 

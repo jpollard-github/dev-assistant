@@ -7,7 +7,53 @@ import * as vscode from "vscode";
 import { describeEvent, ExtensionStateStore, isActiveTask, type ExtensionTaskSummary } from "./state.js";
 import { LocalWorkspaceService } from "./service.js";
 
-type TaskTreeNode = TaskItemNode | EventItemNode | EmptyItemNode;
+type TaskTreeNode = SectionNode | CommandItemNode | TaskItemNode | EventItemNode | EmptyItemNode;
+
+type QuickAction = {
+  readonly label: string;
+  readonly description: string;
+  readonly command: string;
+  readonly icon: string;
+};
+
+const QUICK_ACTIONS: readonly QuickAction[] = [
+  {
+    label: "Start Task",
+    description: "Launch a new assistant run",
+    command: "devAssistant.startTask",
+    icon: "run"
+  },
+  {
+    label: "Cancel Task",
+    description: "Stop the active run at the next checkpoint",
+    command: "devAssistant.cancelTask",
+    icon: "debug-stop"
+  },
+  {
+    label: "Review Diff",
+    description: "Inspect the current git changes",
+    command: "devAssistant.reviewCurrentDiff",
+    icon: "search"
+  },
+  {
+    label: "Generate Tests",
+    description: "Suggest focused tests for the active file",
+    command: "devAssistant.generateTestsForCurrentFile",
+    icon: "beaker"
+  },
+  {
+    label: "Technical Debt",
+    description: "Summarize debt and recommended fixes",
+    command: "devAssistant.explainTechnicalDebt",
+    icon: "warning"
+  },
+  {
+    label: "History",
+    description: "Open recent assistant runs",
+    command: "devAssistant.showHistory",
+    icon: "history"
+  }
+];
 
 class DevAssistantTreeProvider implements vscode.TreeDataProvider<TaskTreeNode> {
   private readonly emitter = new vscode.EventEmitter<TaskTreeNode | undefined>();
@@ -29,10 +75,18 @@ class DevAssistantTreeProvider implements vscode.TreeDataProvider<TaskTreeNode> 
       const snapshot = this.state.snapshot();
 
       if (snapshot.activeTasks.length === 0) {
-        return [createEmptyNode("No active tasks", "Start a task from the command palette to see timeline events here.")];
+        return [];
       }
 
-      return snapshot.activeTasks.map((task) => createTaskNode(task));
+      return [createSectionNode(), ...snapshot.activeTasks.map((task) => createTaskNode(task))];
+    }
+
+    if (element.kind === "section") {
+      if (element.section !== "quick-actions") {
+        return [];
+      }
+
+      return QUICK_ACTIONS.map((action) => createCommandNode(action));
     }
 
     if (element.kind === "task") {
@@ -450,11 +504,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 export function deactivate(): void {}
 
+function createSectionNode(): SectionNode {
+  const item = new vscode.TreeItem("Quick Actions", vscode.TreeItemCollapsibleState.Expanded);
+  item.description = "Common extension commands";
+  item.tooltip = "Common extension commands";
+  item.iconPath = new vscode.ThemeIcon("tools");
+  item.contextValue = "devAssistant.section";
+
+  return {
+    kind: "section",
+    section: "quick-actions",
+    item
+  };
+}
+
+function createCommandNode(action: QuickAction): CommandItemNode {
+  const item = new vscode.TreeItem(action.label, vscode.TreeItemCollapsibleState.None);
+  item.description = action.description;
+  item.tooltip = action.description;
+  item.iconPath = new vscode.ThemeIcon(action.icon);
+  item.contextValue = "devAssistant.command";
+  item.command = {
+    command: action.command,
+    title: action.label
+  };
+
+  return {
+    kind: "command",
+    action,
+    item
+  };
+}
+
 function createTaskNode(task: ExtensionTaskSummary): TaskItemNode {
   const item = new vscode.TreeItem(task.title, vscode.TreeItemCollapsibleState.Expanded);
-  item.description = task.status;
-  item.tooltip = `${task.prompt}\n\n${task.lastMessage ?? ""}`.trim();
-  item.iconPath = new vscode.ThemeIcon(iconForStatus(task.status));
+  item.description = formatTaskDescription(task);
+  item.tooltip = createTaskTooltip(task);
+  item.iconPath = new vscode.ThemeIcon(iconForTask(task));
   item.contextValue = "devAssistant.task";
   item.command = {
     command: "devAssistant.openPendingDiff",
@@ -470,8 +556,9 @@ function createTaskNode(task: ExtensionTaskSummary): TaskItemNode {
 }
 
 function createEventNode(event: TaskEvent): EventItemNode {
-  const item = new vscode.TreeItem(describeEvent(event), vscode.TreeItemCollapsibleState.None);
+  const item = new vscode.TreeItem(formatEventLabel(event), vscode.TreeItemCollapsibleState.None);
   item.description = new Date(event.timestamp).toLocaleTimeString();
+  item.tooltip = createEventTooltip(event);
   item.iconPath = new vscode.ThemeIcon(iconForEvent(event.type));
 
   return {
@@ -491,8 +578,27 @@ function createEmptyNode(label: string, tooltip: string): EmptyItemNode {
   };
 }
 
+function iconForTask(task: ExtensionTaskSummary): string {
+  if (task.pendingApproval) {
+    return "pass-filled";
+  }
+
+  return iconForStatus(task.status);
+}
+
 function iconForStatus(status: ExtensionTaskSummary["status"]): string {
   switch (status) {
+    case "reviewed":
+      return "verified";
+    case "tested":
+      return "beaker";
+    case "patch-applied":
+      return "diff-added";
+    case "patch-proposed":
+      return "git-pull-request-create";
+    case "planned":
+    case "assigned":
+      return "list-tree";
     case "completed":
       return "check";
     case "blocked":
@@ -506,10 +612,28 @@ function iconForStatus(status: ExtensionTaskSummary["status"]): string {
 
 function iconForEvent(eventType: TaskEvent["type"]): string {
   switch (eventType) {
+    case "agent.started":
+      return "loading";
+    case "agent.completed":
+      return "check";
+    case "agent.output-invalid":
+      return "warning";
+    case "agent.prompt-snapshot":
+      return "note";
+    case "patch.previewed":
+      return "diff";
     case "approval.requested":
       return "question";
     case "approval.resolved":
       return "pass";
+    case "tool.result":
+      return "terminal";
+    case "budget.exceeded":
+      return "alert";
+    case "task.created":
+      return "sparkle";
+    case "task.status-changed":
+      return "arrow-right";
     case "task.blocked":
       return "error";
     case "task.completed":
@@ -518,6 +642,116 @@ function iconForEvent(eventType: TaskEvent["type"]): string {
       return "circle-slash";
     default:
       return "history";
+  }
+}
+
+function formatTaskDescription(task: ExtensionTaskSummary): string {
+  if (task.pendingApproval) {
+    return task.pendingApproval.kind === "file-edit" ? "Needs edit approval" : "Needs command approval";
+  }
+
+  if (task.status === "patch-applied" && task.changedFiles.length > 0) {
+    return `${task.changedFiles.length} file${task.changedFiles.length === 1 ? "" : "s"} changed`;
+  }
+
+  return formatStatusLabel(task.status);
+}
+
+function formatStatusLabel(status: ExtensionTaskSummary["status"]): string {
+  switch (status) {
+    case "created":
+      return "Starting";
+    case "planned":
+      return "Planned";
+    case "assigned":
+      return "In progress";
+    case "patch-proposed":
+      return "Patch proposed";
+    case "patch-applied":
+      return "Patch applied";
+    case "reviewed":
+      return "Reviewed";
+    case "tested":
+      return "Tests run";
+    case "completed":
+      return "Completed";
+    case "blocked":
+      return "Blocked";
+    case "cancelled":
+      return "Cancelled";
+  }
+}
+
+function createTaskTooltip(task: ExtensionTaskSummary): vscode.MarkdownString {
+  const tooltip = new vscode.MarkdownString(undefined, true);
+  tooltip.appendMarkdown(`**${escapeMarkdown(task.title)}**\n\n`);
+  tooltip.appendMarkdown(`Status: ${escapeMarkdown(formatTaskDescription(task))}\n\n`);
+
+  if (task.prompt.trim().length > 0) {
+    tooltip.appendMarkdown(`Prompt: ${escapeMarkdown(task.prompt)}\n\n`);
+  }
+
+  if (task.lastMessage?.trim()) {
+    tooltip.appendMarkdown(`Latest: ${escapeMarkdown(task.lastMessage)}\n\n`);
+  }
+
+  if (task.changedFiles.length > 0) {
+    tooltip.appendMarkdown(`Files: ${task.changedFiles.map((file) => `\`${escapeMarkdown(file)}\``).join(", ")}\n\n`);
+  }
+
+  tooltip.appendMarkdown(`Updated: ${escapeMarkdown(new Date(task.updatedAt).toLocaleString())}`);
+  return tooltip;
+}
+
+function formatEventLabel(event: TaskEvent): string {
+  switch (event.type) {
+    case "task.created":
+      return "Task created";
+    case "task.status-changed":
+      return `Stage: ${formatStatusLabel(event.payload.to)}`;
+    case "agent.started":
+      return `${formatAgentRole(event.payload.role)} started`;
+    case "agent.prompt-snapshot":
+      return `${formatAgentRole(event.payload.role)} prompt saved`;
+    case "agent.completed":
+      return `${formatAgentRole(event.payload.role)} finished`;
+    case "agent.output-invalid":
+      return `${formatAgentRole(event.payload.role)} needs retry`;
+    case "patch.previewed":
+      return `Patch ready for ${event.payload.files.length} file${event.payload.files.length === 1 ? "" : "s"}`;
+    case "approval.requested":
+      return event.payload.request.kind === "file-edit" ? "Edit approval requested" : "Command approval requested";
+    case "approval.resolved":
+      return event.payload.decision.approved ? "Approval granted" : "Approval denied";
+    case "tool.result":
+      return `${event.payload.tool} finished`;
+    case "budget.exceeded":
+      return `${event.payload.budget} limit reached`;
+    case "task.completed":
+      return "Task completed";
+    case "task.blocked":
+      return "Task blocked";
+    case "task.cancelled":
+      return "Task cancelled";
+  }
+}
+
+function createEventTooltip(event: TaskEvent): vscode.MarkdownString {
+  const tooltip = new vscode.MarkdownString(undefined, true);
+  tooltip.appendMarkdown(`**${escapeMarkdown(formatEventLabel(event))}**\n\n`);
+  tooltip.appendMarkdown(`${escapeMarkdown(describeEvent(event))}\n\n`);
+  tooltip.appendMarkdown(`Time: ${escapeMarkdown(new Date(event.timestamp).toLocaleString())}`);
+  return tooltip;
+}
+
+function formatAgentRole(role: string): string {
+  switch (role) {
+    case "test-runner":
+      return "Test runner";
+    case "coordinator-report":
+      return "Coordinator report";
+    default:
+      return role.charAt(0).toUpperCase() + role.slice(1);
   }
 }
 
@@ -603,6 +837,18 @@ function escapeHtml(value: string): string {
 interface TaskItemNode {
   readonly kind: "task";
   readonly task: ExtensionTaskSummary;
+  readonly item: vscode.TreeItem;
+}
+
+interface SectionNode {
+  readonly kind: "section";
+  readonly section: "quick-actions";
+  readonly item: vscode.TreeItem;
+}
+
+interface CommandItemNode {
+  readonly kind: "command";
+  readonly action: QuickAction;
   readonly item: vscode.TreeItem;
 }
 
