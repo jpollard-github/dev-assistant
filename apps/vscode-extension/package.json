@@ -1,13 +1,18 @@
 {
-  "name": "@dev-assistant/vscode-extension",
+  "name": "dev-assistant-vscode-extension",
   "version": "0.1.0",
   "private": false,
   "displayName": "Dev Assistant",
   "description": "Local-first multi-agent development assistant for VS Code.",
   "publisher": "dev-assistant-local",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jpollard-github/dev-assistant.git"
+  },
+  "homepage": "https://github.com/jpollard-github/dev-assistant",
   "license": "UNLICENSED",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/apps/vscode-extension/src/index.js",
   "engines": {
     "vscode": "^1.96.0"
   },
@@ -122,16 +127,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "package:vsix": "npx --yes @vscode/vsce package --out ../../dist/dev-assistant.vsix",
+    "prepare:vsix": "node ./scripts/prepare-vsix.mjs",
+    "package:vsix": "node ./scripts/prepare-vsix.mjs && npx --yes @vscode/vsce package --no-dependencies --out ../../dist/dev-assistant.vsix",
     "test": "vitest run --passWithNoTests"
   },
-  "dependencies": {
-    "@dev-assistant/agents": "workspace:*",
-    "@dev-assistant/core": "workspace:*",
-    "@dev-assistant/llm": "workspace:*",
-    "@dev-assistant/mcp-servers": "workspace:*",
-    "@dev-assistant/shared": "workspace:*"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^24.0.3",
     "typescript": "^5.8.3",

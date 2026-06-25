@@ -5,8 +5,8 @@ VS Code packaging surface for the Dev Assistant sidebar, task timeline, review h
 Packaging:
 
 ```sh
-corepack pnpm --filter @dev-assistant/vscode-extension build
-corepack pnpm --filter @dev-assistant/vscode-extension package:vsix
+corepack pnpm --filter ./apps/vscode-extension build
+corepack pnpm --filter ./apps/vscode-extension package:vsix
 ```
 
 Runtime setup and end-to-end workflow guidance live in the repository root:

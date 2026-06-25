@@ -713,6 +713,10 @@ This phase consolidates every still-open item from prior phases, milestones, cos
   Status: Strong MVP improvement.
   Prerequisites: VSIX packaging hook, extension-host automation or documented manual harness, pilot fixture workspaces.
   Notes: this is the fastest way to keep CLI and VSIX behavior aligned once manual pilot coverage exists.
+- [ ] Reduce VSIX size and file count with bundling and a tighter `.vscodeignore`.
+  Status: Strong MVP improvement.
+  Prerequisites: manual VSIX feedback, bundling approach selection, packaging verification after bundle output changes.
+  Notes: current VSIX packaging succeeds, but `vsce` reports a large file count and recommends bundling for better extension performance and cleaner artifacts.
 - [ ] Tighten runtime-budget enforcement and document realistic local-model latency expectations.
   Status: Strong MVP improvement.
   Prerequisites: inspect how `maxRuntimeMs` is enforced across multi-role runs, collect pilot timing data, decide whether to stop earlier or report soft overages more clearly.
