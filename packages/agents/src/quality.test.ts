@@ -68,6 +68,39 @@ describe("enrichReviewerOutput", () => {
     expect(enriched.findings[0]?.filePath).toBe("src/index.ts");
     expect(enriched.findings[0]?.line).toBe(10);
   });
+
+  it("snaps reported lines to the nearest changed line in the diff", () => {
+    const enriched = enrichReviewerOutput(
+      {
+        summary: "There is a regression.",
+        approved: false,
+        findings: [
+          {
+            severity: "high",
+            message: "The exported route points at the wrong model.",
+            filePath: "src/index.ts",
+            line: 12
+          }
+        ]
+      },
+      [
+        "diff --git a/src/index.ts b/src/index.ts",
+        "--- a/src/index.ts",
+        "+++ b/src/index.ts",
+        "@@ -10,7 +10,7 @@",
+        " export function route() {",
+        "   const mode = pickMode();",
+        "-  const target = privateModel;",
+        "-  const audit = publicModel;",
+        "-  return route(mode, target, audit);",
+        "+  const target = publicModel;",
+        " }"
+      ].join("\n"),
+      ["src/index.ts"]
+    );
+
+    expect(enriched.findings[0]?.line).toBe(12);
+  });
 });
 
 describe("sanitizeCoderProposal", () => {

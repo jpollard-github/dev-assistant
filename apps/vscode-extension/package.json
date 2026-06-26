@@ -60,7 +60,7 @@
     "viewsWelcome": [
       {
         "view": "devAssistant.tasks",
-        "contents": "### Dev Assistant\nKeep the sidebar narrow and launch work from here.\n\n[Start Assistant Task](command:devAssistant.startTask)\n[Review Current Diff](command:devAssistant.reviewCurrentDiff)\n[Generate Tests For Current File](command:devAssistant.generateTestsForCurrentFile)\n[Explain Technical Debt](command:devAssistant.explainTechnicalDebt)\n[Show Assistant History](command:devAssistant.showHistory)"
+        "contents": "Run an assistant task or inspect the current workspace.\n\n[Start Assistant Task](command:devAssistant.startTask)\n[Review Current Diff](command:devAssistant.reviewCurrentDiff)\n[Generate Tests For Current File](command:devAssistant.generateTestsForCurrentFile)\n[Explain Technical Debt](command:devAssistant.explainTechnicalDebt)\n[Show Assistant History](command:devAssistant.showHistory)"
       }
     ],
     "commands": [

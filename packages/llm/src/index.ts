@@ -1045,6 +1045,7 @@ function renderCapabilityAwareCoderPrompt(
   capabilities: ModelCapabilityMetadata,
   context: {
     readonly gitStatus: string;
+    readonly gitDiff: string;
     readonly candidateFiles: readonly string[];
     readonly fileSnippets: readonly { path: string; content: string }[];
   }
@@ -1062,6 +1063,9 @@ ${JSON.stringify(input.plan, null, 2)}
 Git status:
 ${context.gitStatus || "(clean)"}
 
+Current diff:
+${context.gitDiff || "(no diff)"}
+
 Candidate files:
 ${JSON.stringify(context.candidateFiles, null, 2)}
 
@@ -1078,6 +1082,8 @@ Requirements:
 - For delete operations, omit content.
 - Explain risk and expected tests in the rationale.
 - Keep commands narrow and relevant.
+- When the current diff already shows the target bug, prefer the smallest fix that corrects that diff instead of rewriting unrelated parts of the file.
+- Preserve unrelated exports, helpers, and surrounding file structure unless the task explicitly requires broader refactoring.
 - Do not modify assistant-control files like \`.dev-assistant/\`, \`.git/\`, or \`dev-assistant.config.json\` unless the user explicitly asked for them.
 - If context is insufficient, say so clearly in rationale rather than inventing details.`
   };
@@ -1341,6 +1347,15 @@ function truncateText(value: string, maxChars: number): string {
   return value.length <= maxChars ? value : `${value.slice(0, maxChars)}\n...[truncated]`;
 }
 
+function summarizeFileForCoderContext(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+
+  const half = Math.max(Math.floor((maxChars - 32) / 2), 200);
+  return `${value.slice(0, half)}\n...[middle truncated]...\n${value.slice(-half)}`;
+}
+
 function extractSearchTerms(prompt: string): string[] {
   return Array.from(
     new Set(
@@ -1359,11 +1374,13 @@ async function gatherCodingContext(
   plan: AgentOutputMap["coordinator"]
 ): Promise<{
   readonly gitStatus: string;
+  readonly gitDiff: string;
   readonly candidateFiles: readonly string[];
   readonly fileSnippets: readonly { path: string; content: string }[];
 }> {
-  const [gitStatus, fileList] = await Promise.all([
+  const [gitStatus, gitDiff, fileList] = await Promise.all([
     gitServer.status(),
+    gitServer.diff(),
     repoServer.listFiles({ recursive: true })
   ]);
 
@@ -1411,13 +1428,14 @@ async function gatherCodingContext(
       path,
       content: await repoServer
         .readFile(path)
-        .then((content) => truncateText(content, 700))
+        .then((content) => summarizeFileForCoderContext(content, 1800))
         .catch(() => "")
     }))
   );
 
   return {
     gitStatus,
+    gitDiff: truncateText(gitDiff, 4000),
     candidateFiles,
     fileSnippets: fileSnippets.filter((file) => file.content.length > 0)
   };

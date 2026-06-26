@@ -4,6 +4,7 @@ import { extname, join } from "node:path";
 import type { ApprovalDecision, ApprovalRequest, TaskEvent } from "@dev-assistant/core";
 import * as vscode from "vscode";
 
+import { renderReviewMarkdown } from "./review-document.js";
 import { describeEvent, ExtensionStateStore, isActiveTask, type ExtensionTaskSummary } from "./state.js";
 import { LocalWorkspaceService } from "./service.js";
 
@@ -230,17 +231,16 @@ class DevAssistantExtension {
       return;
     }
 
-    const summary = await this.service.reviewCurrentDiff();
-    const findings =
-      summary.review.findings.length > 0
-        ? summary.review.findings
-            .map((finding) => `- [${finding.severity}] ${finding.message}${formatLocation(finding.filePath, finding.line)}`)
-            .join("\n")
-        : "- No findings.";
-
-    await this.openMarkdownDocument(
-      "review-summary",
-      `# Diff Review\n\n${summary.review.summary}\n\n## Files\n\n${formatList(summary.diffFiles)}\n\n## Findings\n\n${findings}\n`
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "Reviewing current diff",
+        cancellable: false
+      },
+      async () => {
+        const summary = await this.service.reviewCurrentDiff();
+        await this.openMarkdownDocument("review-summary", renderReviewMarkdown(summary, this.workspacePath));
+      }
     );
   }
 
@@ -481,7 +481,7 @@ class DevAssistantExtension {
     });
     await vscode.window.showTextDocument(document, {
       preview: false,
-      viewColumn: vscode.ViewColumn.Beside
+      viewColumn: vscode.ViewColumn.One
     });
   }
 
@@ -812,14 +812,6 @@ function safeReadFile(filePath: string): string {
 
 function formatList(values: readonly string[]): string {
   return values.length > 0 ? values.map((value) => `- \`${value}\``).join("\n") : "- None";
-}
-
-function formatLocation(filePath?: string, line?: number): string {
-  if (!filePath) {
-    return "";
-  }
-
-  return line ? ` (\`${filePath}:${line}\`)` : ` (\`${filePath}\`)`;
 }
 
 function escapeMarkdown(value: string): string {

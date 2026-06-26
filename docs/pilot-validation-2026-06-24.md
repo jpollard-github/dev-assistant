@@ -202,6 +202,23 @@ Why this matters:
 - A plain clone of this repo was not enough for end-to-end testing because workspace dependency bootstrap was missing; a disposable working-tree copy worked better for validation.
 - Full self-repo runs show the runtime budget is still too tight for the current multi-advisory local-only flow.
 
+## Manual VSIX Follow-Up: 2026-06-25
+
+An initial manual VSIX coding-task pass was run in the disposable `personal` workspace after the seeded `app/music/shared.tsx` regression was confirmed in git diff.
+
+Observed behavior:
+
+- `Review Current Diff` correctly cited `app/music/shared.tsx` with a concrete line reference.
+- `Start Assistant Task` with `Fix the regression in app/music/shared.tsx so progress width is clamped correctly again.` produced a low-fidelity patch that rewrote unrelated parts of the file instead of restoring the `percent` logic.
+- The task ended `blocked` after the file-edit proposal was denied in VS Code.
+- The approval modal made it hard to inspect the proposed edit behind the prompt, which is now a separate VSIX UX follow-up.
+
+Likely root cause and product follow-up:
+
+- The coder prompt had file-path context, but long file snippets were truncated from the top of the file, which could omit the actual bottom-of-file regression.
+- Follow-up product work now includes the current git diff plus larger head/tail file snippets in coder context so the model can see the changed line and preserve unrelated file structure more reliably.
+- The same disposable VSIX scenario should be rerun to validate whether the focused proposal quality improves after that change.
+
 ## Manual VSIX Testing Still Needed
 
 These items could not be validated automatically in this terminal-only session and should be run manually against the same repos.

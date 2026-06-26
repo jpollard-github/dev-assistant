@@ -125,9 +125,13 @@ export function enrichReviewerOutput(
     ...review,
     findings: review.findings.map((finding) => {
       const filePath = finding.filePath ?? fallbackPath;
+      const changedLines = filePath
+        ? (changedLinesByPath.get(normalizePath(filePath)) ?? changedLinesByPath.get(filePath))
+        : undefined;
       const line =
-        finding.line ??
-        (filePath ? (changedLinesByPath.get(normalizePath(filePath)) ?? changedLinesByPath.get(filePath))?.[0] : undefined);
+        finding.line && changedLines && changedLines.length > 0
+          ? snapToNearestChangedLine(finding.line, changedLines)
+          : finding.line ?? changedLines?.[0];
 
       return {
         ...finding,
@@ -232,4 +236,19 @@ function collectChangedLinesByPath(diffText: string): Map<string, number[]> {
   }
 
   return changed;
+}
+
+function snapToNearestChangedLine(line: number, changedLines: readonly number[]): number {
+  let nearest = changedLines[0] ?? line;
+  let nearestDistance = Math.abs(nearest - line);
+
+  for (const candidate of changedLines) {
+    const distance = Math.abs(candidate - line);
+    if (distance < nearestDistance) {
+      nearest = candidate;
+      nearestDistance = distance;
+    }
+  }
+
+  return nearest;
 }

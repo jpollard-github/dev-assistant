@@ -261,35 +261,41 @@ Open these three folders, one at a time or in separate windows:
 
 ### Basic extension health
 
-- Verify the sidebar loads.
-- Verify the empty-state actions render vertically and remain readable in a narrow sidebar.
-- Verify the `Quick Actions` section appears above active tasks once a task starts.
-- Verify active task rows show concise status text and the event timeline reads cleanly without needing wide sidebar space.
-- Verify workspace trust gating behaves correctly.
-- Verify the extension activates without obvious startup errors.
+- [x] Verify the sidebar loads.
+- [x] Verify the empty-state actions render vertically and remain readable in a narrow sidebar.
+- [x] Verify the `Quick Actions` section appears above active tasks once a task starts.
+- [x] Verify active task rows show concise status text and the event timeline reads cleanly without needing wide sidebar space.
+- [x] Verify workspace trust gating behaves correctly.
+- [x] Verify the extension activates without obvious startup errors.
 
 ### Review-only checks
 
-- In `personal`, run `Review Current Diff` and confirm the finding includes:
+- [x] In `personal`, run `Review Current Diff` and confirm the finding includes:
   - `app/music/shared.tsx`
   - a concrete line reference
-- In `mood-switcher`, run `Review Current Diff` and confirm the finding includes:
+- [x] In `mood-switcher`, run `Review Current Diff` and confirm the finding includes:
   - `src/extension.ts`
   - a concrete line reference
-- In `dev-assistant`, run `Review Current Diff` and confirm the finding includes:
+- [x] In `dev-assistant`, run `Review Current Diff` and confirm the finding includes:
   - `packages/shared/src/model-routing.ts`
   - a concrete line reference
 
 ### Coding-task checks
 
-- In `personal`, run one small coding task against the seeded regression.
-- In `mood-switcher`, run one small coding task against the seeded regression.
-- In `dev-assistant`, optionally run one small coding task against the seeded regression if you want to compare with the CLI pilot behavior.
+- Do not manually fix the seeded regression before this step. Leave the bad diff in place and use the extension to propose the fix.
+- In `personal`, run `Start Assistant Task` and ask it to fix the seeded regression in `app/music/shared.tsx`.
+  Example prompt: `Fix the regression in app/music/shared.tsx so progress width is clamped correctly again.`
+- In `mood-switcher`, run `Start Assistant Task` and ask it to fix the seeded regression in `src/extension.ts`.
+  Example prompt: `Fix the regression in src/extension.ts so expired sessions are detected correctly again.`
+- In `dev-assistant`, optionally run `Start Assistant Task` and ask it to fix the seeded regression in `packages/shared/src/model-routing.ts` if you want to compare with the CLI pilot behavior.
+  Example prompt: `Fix the regression in packages/shared/src/model-routing.ts so public repositories route reviewers correctly again.`
 
 While doing that, confirm:
 
+- the assistant understands the request without needing a manual code edit first
 - the task plan is understandable
 - the patch preview is focused
+- the proposed edits are limited to the expected regression fix or closely related changes
 - the reviewer findings are understandable
 - cancellation works
 - the final summary is useful

@@ -727,7 +727,10 @@ This phase consolidates every still-open item from prior phases, milestones, cos
 - [ ] Improve coder patch quality for focused real-repo fixes so reviewer rejection is about real logic issues rather than malformed or low-fidelity rewrites.
   Status: MVP blocker.
   Prerequisites: tighter source-file grounding, diff-size control, file-content fidelity checks, real-repo regression fixtures from pilots.
-  Notes: the blocker has shifted from assistant-control-path noise and file/operation mismatches toward patch quality itself.
+  Notes:
+  - The blocker has shifted from assistant-control-path noise and file/operation mismatches toward patch quality itself.
+  - A manual VSIX pass on 2026-06-25 in the disposable `personal` workspace still produced an unrelated low-fidelity rewrite for the seeded `app/music/shared.tsx` regression even though review-only mode cited the correct file and line.
+  - Follow-up product work now includes the current git diff plus larger head/tail file snippets in coder context so bottom-of-file regressions are visible to the model; re-run the same VSIX task to validate whether proposal quality improves.
 - [ ] Make external-repo onboarding smoother for monorepos and local-only clones, especially when dependencies are not installed yet.
   Status: Strong MVP improvement.
   Prerequisites: better doctor guidance, bootstrap docs, maybe copy-safe or offline-friendly setup suggestions, interface hints in CLI/VSIX.
@@ -858,14 +861,16 @@ Manual validation to run:
 Manual VSIX testing to do next:
 
 - [ ] Follow [VSIX-TESTING.md](/Users/jasonp/repos/dev-assistant/VSIX-TESTING.md) for packaging, install/uninstall, disposable workspace creation, seeded regressions, and evidence capture.
-- [ ] Use disposable clones of `personal` and `mood-switcher`, then use a disposable working-tree copy of this repo for the third TypeScript pilot workspace so local dependencies are already present.
-- [ ] In `personal`, run Review Current Diff on the seeded `app/music/shared.tsx` regression and confirm the result includes a concrete file and line.
-- [ ] In `mood-switcher`, run Review Current Diff on the seeded `src/extension.ts` regression and confirm the result includes a concrete file and line.
-- [ ] In `dev-assistant`, run Review Current Diff on the seeded `packages/shared/src/model-routing.ts` regression and confirm the result includes a concrete file and line.
+- [x] Use disposable clones of `personal` and `mood-switcher`, then use a disposable working-tree copy of this repo for the third TypeScript pilot workspace so local dependencies are already present.
+- [x] In `personal`, run Review Current Diff on the seeded `app/music/shared.tsx` regression and confirm the result includes a concrete file and line.
+- [x] In `mood-switcher`, run Review Current Diff on the seeded `src/extension.ts` regression and confirm the result includes a concrete file and line.
+- [x] In `dev-assistant`, run Review Current Diff on the seeded `packages/shared/src/model-routing.ts` regression and confirm the result includes a concrete file and line.
 - [ ] In `personal` and `mood-switcher`, run one small coding task and confirm the patch preview no longer proposes edits under `.dev-assistant/`, `.git/`, or `dev-assistant.config.json` unless you explicitly asked for them.
 - [ ] In `dev-assistant`, optionally run one small coding task and compare the extension behavior with the latest CLI pilot notes.
 - [ ] In the same VSIX sessions, run Generate Tests For Current File and confirm the output now includes proposed test files and suggested test commands, not only prose recommendations.
 - [ ] Confirm approval UI wording is clear for both file edits and shell commands, especially after a reviewer rejection or blocked run.
+  Notes:
+  - Manual VSIX feedback on 2026-06-25 said the approval modal made it hard to inspect the proposed edit behind the prompt, so clarity/readability is still not good enough even when the action labels are understandable.
 - [ ] Confirm the task timeline/history is readable during a full run and does not become too noisy.
 - [ ] Confirm local-only privacy messaging stays clear and that no hosted-routing acknowledgement is shown unless you intentionally enable hosted routing.
 - [ ] If the local model runtime throws `fetch failed` or similar transient errors, record the repo, command, timestamp, and any VS Code developer-console output so we can separate product issues from Ollama/runtime instability.

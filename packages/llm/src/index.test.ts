@@ -265,6 +265,84 @@ describe("createCapabilityBackedAgentHandlers", () => {
     expect(envelope.metadata?.promptSnapshot).toContain("Git status");
   });
 
+  it("includes the current diff and tail content for focused bug-fix prompts", async () => {
+    const longSharedTsx = `${"import type { CSSProperties, ReactNode } from \"react\";\n".repeat(20)}
+export function percent(value: number, max: number) {
+  return \`${"${Math.min((value / max) * 100, 2).toFixed(2)}"}%\`;
+}
+`;
+
+    const repoServer: RepoMcpServer = {
+      async listFiles() {
+        return [{ path: "app/music/shared.tsx", kind: "file" }];
+      },
+      async readFile(path: string) {
+        if (path === "app/music/shared.tsx") {
+          return longSharedTsx;
+        }
+        return "";
+      },
+      async search(pattern: string) {
+        return [{ path: "app/music/shared.tsx", line: 95, column: 1, preview: pattern }];
+      },
+      async inspectFileMetadata(path: string) {
+        return {
+          path,
+          size: longSharedTsx.length,
+          modifiedAt: new Date().toISOString(),
+          isDirectory: false,
+          extension: ".tsx"
+        };
+      }
+    };
+
+    const gitServer: GitMcpServer = {
+      async status() {
+        return " M app/music/shared.tsx";
+      },
+      async diff() {
+        return [
+          "diff --git a/app/music/shared.tsx b/app/music/shared.tsx",
+          "--- a/app/music/shared.tsx",
+          "+++ b/app/music/shared.tsx",
+          "@@ -95,1 +95,1 @@",
+          '-  return `${Math.max((value / max) * 100, 2).toFixed(2)}%`;',
+          '+  return `${Math.min((value / max) * 100, 2).toFixed(2)}%`;'
+        ].join("\n");
+      },
+      async log() {
+        return [];
+      },
+      async currentBranch() {
+        return "main";
+      }
+    };
+
+    const handlers = createCapabilityBackedAgentHandlers({
+      provider: createFakeProvider(),
+      repoPath: "/repo",
+      repoServer,
+      gitServer,
+      testServer: createFakeServers().testServer,
+      memoryServer: createFakeServers().memoryServer
+    });
+
+    const coder = await handlers.coder({
+      taskId: "task-ctx-2",
+      prompt: "Fix the regression in app/music/shared.tsx so progress width is clamped correctly again.",
+      plan: {
+        summary: "Plan",
+        steps: [{ id: "edit", description: "Fix the regression", kind: "edit" }],
+        requiresTests: true
+      }
+    });
+
+    const envelope = coder as { metadata?: { promptSnapshot?: string } };
+    expect(envelope.metadata?.promptSnapshot).toContain("Current diff");
+    expect(envelope.metadata?.promptSnapshot).toContain("Math.min((value / max) * 100, 2)");
+    expect(envelope.metadata?.promptSnapshot).toContain("Math.max((value / max) * 100, 2)");
+  });
+
   it("supports role-specific providers", async () => {
     const seenRoles: string[] = [];
     const hostedProvider = createFakeProvider("hosted-provider");
